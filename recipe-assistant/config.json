@@ -6,6 +6,7 @@
   "url": "https://github.com/dein-repo/homeassistant-recipe-assistant",
   "startup": "application",
   "boot": "auto",
+  "arch": ["aarch64", "amd64", "armv7", "i386"],  # ✅ Home Assistant erwartet diesen Eintrag!
   "panel_icon": "mdi:food",
   "panel_title": "Recipe Assistant",
   "ingress": true,
