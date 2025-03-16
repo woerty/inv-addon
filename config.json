@@ -1,0 +1,19 @@
+{
+  "name": "Recipe Assistant",
+  "version": "1.0",
+  "slug": "recipe_assistant",
+  "description": "Ein Rezept- und Chat-Assistent mit OpenAI",
+  "url": "https://github.com/dein-repo/homeassistant-recipe-assistant",
+  "startup": "application",
+  "boot": "auto",
+  "panel_icon": "mdi:food",
+  "panel_title": "Recipe Assistant",
+  "ingress": true,
+  "ingress_port": 8080,
+  "ports": {
+    "5000/tcp": 5000
+  },
+  "map": ["config:rw"],
+  "options": {},
+  "schema": {}
+}
