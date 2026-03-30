@@ -24,8 +24,17 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install Python dependencies
-COPY backend/pyproject.toml ./backend/
-RUN pip install --no-cache-dir ./backend
+RUN pip install --no-cache-dir \
+    "fastapi>=0.115.0" \
+    "uvicorn[standard]>=0.34.0" \
+    "sqlalchemy[asyncio]>=2.0.36" \
+    "asyncpg>=0.30.0" \
+    "alembic>=1.14.0" \
+    "pydantic>=2.10.0" \
+    "pydantic-settings>=2.7.0" \
+    "httpx>=0.28.0" \
+    "anthropic>=0.43.0" \
+    "openai>=1.60.0"
 
 # Copy backend
 COPY backend/ ./backend/
