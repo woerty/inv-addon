@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Box,
   Button,
   FormControl,
   FormControlLabel,
@@ -13,10 +14,12 @@ import {
   Typography,
 } from "@mui/material";
 import { useZxing } from "react-zxing";
-import { useScanner } from "../hooks/useScanner";
+import { useScanner, useCameraSwitch } from "../hooks/useScanner";
 import { useNotification } from "../components/NotificationProvider";
 import { addItemByBarcode, removeItemByBarcode, getStorageLocations, createStorageLocation } from "../api/client";
 import type { StorageLocation } from "../types";
+import CameraswitchIcon from "@mui/icons-material/Cameraswitch";
+import { IconButton } from "@mui/material";
 
 const ScanPage = () => {
   const { notify } = useNotification();
@@ -53,8 +56,10 @@ const ScanPage = () => {
   };
 
   const { lastScanned, handleDecode } = useScanner({ onScan: processBarcode });
+  const { facingMode, toggle: toggleCamera } = useCameraSwitch();
   const { ref } = useZxing({
     onDecodeResult: (result) => handleDecode(result.getText()),
+    constraints: { video: { facingMode } },
   });
 
   const handleManualSubmit = (e: React.FormEvent) => {
@@ -78,7 +83,22 @@ const ScanPage = () => {
         </RadioGroup>
       </FormControl>
 
-      <video ref={ref} style={{ width: "100%", maxHeight: 300, borderRadius: 8 }} />
+      <Box sx={{ position: "relative" }}>
+        <video ref={ref} style={{ width: "100%", maxHeight: 300, borderRadius: 8 }} />
+        <IconButton
+          onClick={toggleCamera}
+          sx={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            bgcolor: "rgba(0,0,0,0.5)",
+            color: "white",
+            "&:hover": { bgcolor: "rgba(0,0,0,0.7)" },
+          }}
+        >
+          <CameraswitchIcon />
+        </IconButton>
+      </Box>
 
       {lastScanned && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>

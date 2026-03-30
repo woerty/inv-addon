@@ -32,3 +32,13 @@ export function useScanner({ onScan, cooldownMs = 2000 }: UseScannerOptions) {
 
   return { lastScanned, handleDecode };
 }
+
+export function useCameraSwitch() {
+  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
+
+  const toggle = useCallback(() => {
+    setFacingMode((prev) => (prev === "environment" ? "user" : "environment"));
+  }, []);
+
+  return { facingMode, toggle };
+}

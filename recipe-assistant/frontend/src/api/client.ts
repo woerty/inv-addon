@@ -11,13 +11,19 @@ async function request<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+  } catch (e) {
+    throw new Error(`Netzwerkfehler: Server nicht erreichbar (${path})`);
+  }
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: "Unbekannter Fehler" }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
+    const error = await response.json().catch(() => null);
+    const detail = error?.detail || error?.message || `HTTP ${response.status}: ${response.statusText}`;
+    throw new Error(detail);
   }
   return response.json();
 }

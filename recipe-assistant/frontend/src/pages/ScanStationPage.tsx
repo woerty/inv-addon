@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Box, Button, Paper, Typography } from "@mui/material";
+import { IconButton } from "@mui/material";
+import CameraswitchIcon from "@mui/icons-material/Cameraswitch";
 import { useZxing } from "react-zxing";
 import { useNavigate } from "react-router-dom";
-import { useScanner } from "../hooks/useScanner";
+import { useScanner, useCameraSwitch } from "../hooks/useScanner";
 import { addItemByBarcode, removeItemByBarcode } from "../api/client";
 
 type Mode = "add" | "remove";
@@ -33,8 +35,10 @@ const ScanStationPage = () => {
   };
 
   const { handleDecode } = useScanner({ onScan: processBarcode, cooldownMs: 2000 });
+  const { facingMode, toggle: toggleCamera } = useCameraSwitch();
   const { ref } = useZxing({
     onDecodeResult: (result) => handleDecode(result.getText()),
+    constraints: { video: { facingMode } },
   });
 
   return (
@@ -72,7 +76,7 @@ const ScanStationPage = () => {
       </Box>
 
       {/* Camera */}
-      <Box sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", p: 2 }}>
+      <Box sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", p: 2, position: "relative" }}>
         <video
           ref={ref}
           style={{
@@ -82,6 +86,19 @@ const ScanStationPage = () => {
             objectFit: "cover",
           }}
         />
+        <IconButton
+          onClick={toggleCamera}
+          sx={{
+            position: "absolute",
+            top: 16,
+            right: 16,
+            bgcolor: "rgba(255,255,255,0.2)",
+            color: "white",
+            "&:hover": { bgcolor: "rgba(255,255,255,0.4)" },
+          }}
+        >
+          <CameraswitchIcon fontSize="large" />
+        </IconButton>
       </Box>
 
       {/* Mode Toggle */}
