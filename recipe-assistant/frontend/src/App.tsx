@@ -9,7 +9,7 @@ import ChatPage from "./pages/ChatPage";
 
 const AppContent = () => {
   const location = useLocation();
-  const hideNavbar = location.pathname === "/scan-station";
+  const hideNavbar = location.pathname.endsWith("/scan-station");
 
   return (
     <>
@@ -25,12 +25,19 @@ const AppContent = () => {
   );
 };
 
-const App = () => (
-  <BrowserRouter>
-    <NotificationProvider>
-      <AppContent />
-    </NotificationProvider>
-  </BrowserRouter>
-);
+const App = () => {
+  // Detect HA ingress base path from document.baseURI
+  const basePath = document.baseURI
+    ? new URL(document.baseURI).pathname.replace(/\/$/, "")
+    : "";
+
+  return (
+    <BrowserRouter basename={basePath}>
+      <NotificationProvider>
+        <AppContent />
+      </NotificationProvider>
+    </BrowserRouter>
+  );
+};
 
 export default App;
