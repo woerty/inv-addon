@@ -1,10 +1,11 @@
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { NotificationProvider } from "./components/NotificationProvider";
 import Navbar from "./components/Navbar";
-
-const Placeholder = ({ name }: { name: string }) => (
-  <div style={{ padding: 24 }}>{name} - Coming Soon</div>
-);
+import InventoryPage from "./pages/InventoryPage";
+import ScanPage from "./pages/ScanPage";
+import ScanStationPage from "./pages/ScanStationPage";
+import RecipesPage from "./pages/RecipesPage";
+import ChatPage from "./pages/ChatPage";
 
 const AppContent = () => {
   const location = useLocation();
@@ -14,11 +15,11 @@ const AppContent = () => {
     <>
       {!hideNavbar && <Navbar />}
       <Routes>
-        <Route path="/" element={<Placeholder name="Inventar" />} />
-        <Route path="/scan" element={<Placeholder name="Scannen" />} />
-        <Route path="/scan-station" element={<Placeholder name="Scan-Station" />} />
-        <Route path="/recipes" element={<Placeholder name="Rezepte" />} />
-        <Route path="/chat" element={<Placeholder name="Chat" />} />
+        <Route path="/" element={<InventoryPage />} />
+        <Route path="/scan" element={<ScanPage />} />
+        <Route path="/scan-station" element={<ScanStationPage />} />
+        <Route path="/recipes" element={<RecipesPage />} />
+        <Route path="/chat" element={<ChatPage />} />
       </Routes>
     </>
   );
