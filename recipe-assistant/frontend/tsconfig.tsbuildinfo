@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/main.tsx"],"version":"5.9.3"}
+{"root":["./src/App.tsx","./src/main.tsx","./src/api/client.ts","./src/components/Navbar.tsx","./src/components/NotificationProvider.tsx","./src/hooks/useChat.ts","./src/hooks/useInventory.ts","./src/hooks/useScanner.ts","./src/pages/ChatPage.tsx","./src/pages/InventoryPage.tsx","./src/pages/RecipesPage.tsx","./src/pages/ScanPage.tsx","./src/pages/ScanStationPage.tsx","./src/types/index.ts"],"version":"5.9.3"}
