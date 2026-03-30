@@ -1,0 +1,206 @@
+import { useState } from "react";
+import {
+  Button,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TableSortLabel,
+  TextField,
+  Typography,
+} from "@mui/material";
+import { useInventory } from "../hooks/useInventory";
+import { useNotification } from "../components/NotificationProvider";
+
+type SortKey = "name" | "quantity" | "category" | "barcode" | "added_date";
+type Order = "asc" | "desc";
+
+const InventoryPage = () => {
+  const inventory = useInventory();
+  const { items, loading, refetch } = inventory;
+  const { notify } = useNotification();
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<SortKey>("name");
+  const [order, setOrder] = useState<Order>("asc");
+  const [editFields, setEditFields] = useState<
+    Record<number, { quantity?: string; storage_location?: string; expiration_date?: string }>
+  >({});
+
+  const handleSort = (key: SortKey) => {
+    const newOrder = sortBy === key && order === "asc" ? "desc" : "asc";
+    setSortBy(key);
+    setOrder(newOrder);
+    refetch(search, key, newOrder);
+  };
+
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    refetch(value, sortBy, order);
+  };
+
+  const handleFieldChange = (id: number, field: string, value: string) => {
+    setEditFields((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], [field]: value },
+    }));
+  };
+
+  const handleUpdate = async (id: number, barcode: string) => {
+    const fields = editFields[id];
+    if (!fields) return;
+
+    try {
+      const updateData: { quantity?: number; storage_location?: string; expiration_date?: string } = {};
+      if (fields.quantity !== undefined) {
+        const qty = parseInt(fields.quantity, 10);
+        if (isNaN(qty) || qty < 0) return;
+        if (qty === 0 && !window.confirm("Artikel wirklich löschen?")) return;
+        updateData.quantity = qty;
+      }
+      if (fields.storage_location !== undefined) updateData.storage_location = fields.storage_location;
+      if (fields.expiration_date !== undefined) updateData.expiration_date = fields.expiration_date;
+
+      const result = await inventory.update(barcode, updateData);
+      notify(result.message, "success");
+      setEditFields((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Fehler beim Aktualisieren", "error");
+    }
+  };
+
+  const handleDelete = async (barcode: string) => {
+    if (!window.confirm("Artikel wirklich löschen?")) return;
+    try {
+      const result = await inventory.delete(barcode);
+      notify(result.message, "success");
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Fehler beim Löschen", "error");
+    }
+  };
+
+  const columns: { key: SortKey; label: string }[] = [
+    { key: "name", label: "Name" },
+    { key: "barcode", label: "Barcode" },
+    { key: "quantity", label: "Menge" },
+    { key: "category", label: "Kategorie" },
+    { key: "added_date", label: "Hinzugefügt" },
+  ];
+
+  return (
+    <Paper sx={{ p: 2, m: 2 }}>
+      <Typography variant="h4" gutterBottom>
+        Inventarverwaltung
+      </Typography>
+      <TextField
+        label="Suche nach Name oder Kategorie"
+        variant="outlined"
+        fullWidth
+        margin="normal"
+        value={search}
+        onChange={(e) => handleSearch(e.target.value)}
+      />
+      <TableContainer>
+        <Table>
+          <TableHead>
+            <TableRow>
+              {columns.map((col) => (
+                <TableCell key={col.key}>
+                  <TableSortLabel
+                    active={sortBy === col.key}
+                    direction={sortBy === col.key ? order : "asc"}
+                    onClick={() => handleSort(col.key)}
+                  >
+                    {col.label}
+                  </TableSortLabel>
+                </TableCell>
+              ))}
+              <TableCell>Lagerort</TableCell>
+              <TableCell>Ablaufdatum</TableCell>
+              <TableCell>Aktionen</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {items.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell>{item.name}</TableCell>
+                <TableCell>{item.barcode}</TableCell>
+                <TableCell>
+                  <TextField
+                    type="number"
+                    size="small"
+                    sx={{ width: 80 }}
+                    value={editFields[item.id]?.quantity ?? item.quantity}
+                    onChange={(e) => handleFieldChange(item.id, "quantity", e.target.value)}
+                  />
+                </TableCell>
+                <TableCell>{item.category}</TableCell>
+                <TableCell>{new Date(item.added_date).toLocaleDateString("de-DE")}</TableCell>
+                <TableCell>
+                  <TextField
+                    size="small"
+                    sx={{ width: 130 }}
+                    value={
+                      editFields[item.id]?.storage_location ??
+                      item.storage_location?.name ??
+                      ""
+                    }
+                    onChange={(e) =>
+                      handleFieldChange(item.id, "storage_location", e.target.value)
+                    }
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    type="date"
+                    size="small"
+                    sx={{ width: 150 }}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    value={editFields[item.id]?.expiration_date ?? item.expiration_date ?? ""}
+                    onChange={(e) =>
+                      handleFieldChange(item.id, "expiration_date", e.target.value)
+                    }
+                  />
+                </TableCell>
+                <TableCell sx={{ whiteSpace: "nowrap" }}>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    sx={{ mr: 1 }}
+                    onClick={() => handleUpdate(item.id, item.barcode)}
+                    disabled={!editFields[item.id]}
+                  >
+                    Speichern
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    size="small"
+                    onClick={() => handleDelete(item.barcode)}
+                  >
+                    Löschen
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+            {!loading && items.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  Keine Artikel gefunden.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Paper>
+  );
+};
+
+export default InventoryPage;
