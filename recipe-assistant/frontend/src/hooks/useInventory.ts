@@ -28,6 +28,19 @@ export function useInventory() {
 
   useEffect(() => {
     fetch();
+
+    // Refetch when page becomes visible (e.g. navigating back from scan page)
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") fetch();
+    };
+    const handleFocus = () => fetch();
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, [fetch]);
 
   const add = async (barcode: string, storageLocation?: string, expirationDate?: string) => {

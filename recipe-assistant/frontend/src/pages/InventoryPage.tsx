@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Paper,
@@ -22,6 +22,11 @@ const InventoryPage = () => {
   const inventory = useInventory();
   const { items, loading, refetch } = inventory;
   const { notify } = useNotification();
+
+  // Refetch every time this page is rendered (navigation back from scan, etc.)
+  useEffect(() => {
+    refetch();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("name");
   const [order, setOrder] = useState<Order>("asc");
