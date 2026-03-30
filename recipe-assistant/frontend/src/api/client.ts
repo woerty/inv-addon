@@ -5,7 +5,7 @@ import type {
   ChatMessage,
 } from "../types";
 
-const BASE = "/api";
+const BASE = "./api";
 
 async function request<T>(
   path: string,
