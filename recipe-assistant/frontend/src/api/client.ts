@@ -3,6 +3,7 @@ import type {
   StorageLocation,
   Recipe,
   ChatMessage,
+  Person,
 } from "../types";
 
 const BASE = "./api";
@@ -80,9 +81,30 @@ export const createStorageLocation = (name: string) =>
 export const deleteStorageLocation = (id: number) =>
   request<{ message: string }>(`/storage-locations/${id}`, { method: "DELETE" });
 
+// Persons
+export const getPersons = () =>
+  request<Person[]>("/persons/");
+
+export const createPerson = (name: string, preferences: string = "") =>
+  request<Person>("/persons/", {
+    method: "POST",
+    body: JSON.stringify({ name, preferences }),
+  });
+
+export const updatePerson = (id: number, data: { name?: string; preferences?: string }) =>
+  request<Person>(`/persons/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+
+export const deletePerson = (id: number) =>
+  request<{ message: string }>(`/persons/${id}`, { method: "DELETE" });
+
 // Assistant
-export const getRecipeSuggestions = () =>
-  request<{ recipes: Recipe[] }>("/assistant/recipes");
+export const getRecipeSuggestions = (personIds?: number[]) => {
+  const params = personIds?.length ? `?person_ids=${personIds.join(",")}` : "";
+  return request<{ recipes: Recipe[] }>(`/assistant/recipes${params}`);
+};
 
 export const generateRecipeImage = (name: string) =>
   request<{ image_url: string | null }>("/assistant/recipe-image", {

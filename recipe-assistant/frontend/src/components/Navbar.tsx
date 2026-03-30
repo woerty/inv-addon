@@ -17,6 +17,7 @@ import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
 import CropFreeIcon from "@mui/icons-material/CropFree";
 import RestaurantIcon from "@mui/icons-material/Restaurant";
 import ChatIcon from "@mui/icons-material/Chat";
+import PeopleIcon from "@mui/icons-material/People";
 import { useNavigate, useLocation } from "react-router-dom";
 
 const NAV_ITEMS = [
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { path: "/scan-station", label: "Scan-Station", icon: <CropFreeIcon /> },
   { path: "/recipes", label: "Rezepte", icon: <RestaurantIcon /> },
   { path: "/chat", label: "Chat", icon: <ChatIcon /> },
+  { path: "/persons", label: "Personen", icon: <PeopleIcon /> },
 ];
 
 const Navbar = () => {

@@ -6,6 +6,7 @@ import ScanPage from "./pages/ScanPage";
 import ScanStationPage from "./pages/ScanStationPage";
 import RecipesPage from "./pages/RecipesPage";
 import ChatPage from "./pages/ChatPage";
+import PersonsPage from "./pages/PersonsPage";
 
 const AppContent = () => {
   const location = useLocation();
@@ -20,6 +21,7 @@ const AppContent = () => {
         <Route path="/scan-station" element={<ScanStationPage />} />
         <Route path="/recipes" element={<RecipesPage />} />
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/persons" element={<PersonsPage />} />
       </Routes>
     </>
   );

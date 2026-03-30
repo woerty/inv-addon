@@ -27,3 +27,9 @@ export interface ChatMessage {
   content: string;
   timestamp?: string;
 }
+
+export interface Person {
+  id: number;
+  name: string;
+  preferences: string;
+}

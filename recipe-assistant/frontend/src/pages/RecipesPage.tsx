@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
+  Chip,
   CircularProgress,
   Container,
   FormControlLabel,
@@ -12,8 +13,8 @@ import {
 import Grid from "@mui/material/Grid";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { getRecipeSuggestions, generateRecipeImage } from "../api/client";
-import type { Recipe } from "../types";
+import { getRecipeSuggestions, generateRecipeImage, getPersons } from "../api/client";
+import type { Recipe, Person } from "../types";
 
 const RecipesPage = () => {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -23,13 +24,29 @@ const RecipesPage = () => {
   const [recipeImage, setRecipeImage] = useState("");
   const [generateImages, setGenerateImages] = useState(false);
 
+  // Persons
+  const [persons, setPersons] = useState<Person[]>([]);
+  const [selectedPersonIds, setSelectedPersonIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    getPersons().then(setPersons).catch(() => {});
+  }, []);
+
+  const togglePerson = (id: number) => {
+    setSelectedPersonIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
   const fetchRecipes = async () => {
     setLoading(true);
     setError("");
     setSelectedRecipe(null);
 
     try {
-      const data = await getRecipeSuggestions();
+      const data = await getRecipeSuggestions(
+        selectedPersonIds.length > 0 ? selectedPersonIds : undefined
+      );
       setRecipes(data.recipes);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Fehler beim Abrufen der Rezepte.");
@@ -61,6 +78,30 @@ const RecipesPage = () => {
         KI-Kochassistent
       </Typography>
 
+      {/* Person selection */}
+      {persons.length > 0 && (
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Typography variant="subtitle1" gutterBottom>
+            Wer isst mit?
+          </Typography>
+          {persons.map((person) => (
+            <Chip
+              key={person.id}
+              label={person.name}
+              onClick={() => togglePerson(person.id)}
+              color={selectedPersonIds.includes(person.id) ? "primary" : "default"}
+              variant={selectedPersonIds.includes(person.id) ? "filled" : "outlined"}
+              sx={{ mr: 1, mb: 1 }}
+            />
+          ))}
+          {selectedPersonIds.length > 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Vorlieben von {selectedPersonIds.length} Person(en) werden berücksichtigt
+            </Typography>
+          )}
+        </Paper>
+      )}
+
       <FormControlLabel
         control={
           <Switch
@@ -90,19 +131,28 @@ const RecipesPage = () => {
       )}
 
       {!selectedRecipe && recipes.length > 0 && (
-        <Grid container spacing={2} sx={{ mt: 2 }}>
-          {recipes.map((recipe, i) => (
-            <Grid key={i} item xs={12} sm={6}>
-              <Button
-                variant="contained"
-                fullWidth
-                onClick={() => handleRecipeClick(recipe)}
-              >
-                {recipe.name}
-              </Button>
-            </Grid>
-          ))}
-        </Grid>
+        <>
+          <Button
+            variant="outlined"
+            onClick={() => { setRecipes([]); setSelectedRecipe(null); }}
+            sx={{ mb: 2 }}
+          >
+            Neue Vorschläge
+          </Button>
+          <Grid container spacing={2}>
+            {recipes.map((recipe, i) => (
+              <Grid key={i} item xs={12} sm={6}>
+                <Button
+                  variant="contained"
+                  fullWidth
+                  onClick={() => handleRecipeClick(recipe)}
+                >
+                  {recipe.name}
+                </Button>
+              </Grid>
+            ))}
+          </Grid>
+        </>
       )}
 
       {selectedRecipe && (

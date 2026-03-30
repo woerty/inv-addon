@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.chat import ChatMessage
 from app.models.inventory import InventoryItem
+from app.models.person import Person
 from app.schemas.chat import ChatHistoryResponse, ChatMessageResponse, ChatRequest, ChatResponse
 from app.schemas.recipe import RecipeImageRequest, RecipeImageResponse, RecipeListResponse
 from app.services.ai_chat import get_chat_response
@@ -19,7 +20,10 @@ router = APIRouter()
 
 
 @router.get("/recipes", response_model=RecipeListResponse)
-async def recipe_suggestions(db: AsyncSession = Depends(get_db)):
+async def recipe_suggestions(
+    person_ids: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(InventoryItem.name).where(InventoryItem.quantity > 0)
     )
@@ -28,7 +32,17 @@ async def recipe_suggestions(db: AsyncSession = Depends(get_db)):
     if not ingredients:
         raise HTTPException(status_code=400, detail="Keine Lebensmittel im Inventar gefunden.")
 
-    recipes = await get_recipe_suggestions(ingredients)
+    # Load preferences for selected persons
+    preferences: list[str] = []
+    if person_ids:
+        ids = [int(x) for x in person_ids.split(",") if x.strip()]
+        if ids:
+            persons_result = await db.execute(select(Person).where(Person.id.in_(ids)))
+            for person in persons_result.scalars().all():
+                if person.preferences.strip():
+                    preferences.append(f"{person.name}: {person.preferences}")
+
+    recipes = await get_recipe_suggestions(ingredients, preferences)
     return RecipeListResponse(recipes=recipes)
 
 
