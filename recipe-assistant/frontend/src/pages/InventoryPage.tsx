@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  Box,
   Button,
   Paper,
   Table,
@@ -12,8 +13,11 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import FileDownloadIcon from "@mui/icons-material/FileDownload";
+import FileUploadIcon from "@mui/icons-material/FileUpload";
 import { useInventory } from "../hooks/useInventory";
 import { useNotification } from "../components/NotificationProvider";
+import { exportData, importData } from "../api/client";
 
 type SortKey = "name" | "quantity" | "category" | "barcode" | "added_date";
 type Order = "asc" | "desc";
@@ -23,11 +27,41 @@ const InventoryPage = () => {
   const { items, loading, refetch } = inventory;
   const { notify } = useNotification();
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Refetch every time this page is rendered (navigation back from scan, etc.)
   useEffect(() => {
     refetch();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [search, setSearch] = useState("");
+
+  const handleExport = async () => {
+    try {
+      const blob = await exportData();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `inventar-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      notify("Export heruntergeladen", "success");
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Export fehlgeschlagen", "error");
+    }
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const result = await importData(file);
+      notify(result.message, "success");
+      refetch();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Import fehlgeschlagen", "error");
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
   const [sortBy, setSortBy] = useState<SortKey>("name");
   const [order, setOrder] = useState<Order>("asc");
   const [editFields, setEditFields] = useState<
@@ -103,6 +137,31 @@ const InventoryPage = () => {
       <Typography variant="h4" gutterBottom>
         Inventarverwaltung
       </Typography>
+      <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<FileDownloadIcon />}
+          onClick={handleExport}
+        >
+          Export
+        </Button>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<FileUploadIcon />}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          Import
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          hidden
+          onChange={handleImport}
+        />
+      </Box>
       <TextField
         label="Suche nach Name oder Kategorie"
         variant="outlined"

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -8,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.inventory import InventoryItem, StorageLocation
 from app.models.log import InventoryLog
+from app.models.person import Person
 from app.schemas.inventory import (
     BarcodeAddRequest,
     BarcodeRemoveRequest,
@@ -167,3 +171,112 @@ async def delete_item(
     await db.delete(item)
     await db.commit()
     return {"message": f"Artikel mit Barcode {barcode} wurde gelöscht."}
+
+
+@router.get("/export")
+async def export_data(db: AsyncSession = Depends(get_db)):
+    """Export all inventory data as JSON for backup."""
+    items_result = await db.execute(
+        select(InventoryItem).options(selectinload(InventoryItem.storage_location))
+    )
+    items = items_result.scalars().all()
+
+    locations_result = await db.execute(select(StorageLocation))
+    locations = locations_result.scalars().all()
+
+    persons_result = await db.execute(select(Person))
+    persons = persons_result.scalars().all()
+
+    export = {
+        "version": "2.0",
+        "inventory": [
+            {
+                "barcode": item.barcode,
+                "name": item.name,
+                "quantity": item.quantity,
+                "category": item.category,
+                "storage_location": item.storage_location.name if item.storage_location else None,
+                "expiration_date": item.expiration_date.isoformat() if item.expiration_date else None,
+            }
+            for item in items
+        ],
+        "storage_locations": [loc.name for loc in locations],
+        "persons": [
+            {"name": p.name, "preferences": p.preferences}
+            for p in persons
+        ],
+    }
+    return JSONResponse(content=export)
+
+
+@router.post("/import")
+async def import_data(db: AsyncSession = Depends(get_db), file: UploadFile = ...):
+    """Import inventory data from JSON backup. Merges with existing data."""
+    import json
+
+    content = await file.read()
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Ungültige JSON Datei")
+
+    imported_count = 0
+
+    # Import storage locations
+    for loc_name in data.get("storage_locations", []):
+        result = await db.execute(select(StorageLocation).where(StorageLocation.name == loc_name))
+        if not result.scalar_one_or_none():
+            db.add(StorageLocation(name=loc_name))
+
+    await db.flush()
+
+    # Import persons
+    for person_data in data.get("persons", []):
+        result = await db.execute(select(Person).where(Person.name == person_data["name"]))
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.preferences = person_data.get("preferences", "")
+        else:
+            db.add(Person(name=person_data["name"], preferences=person_data.get("preferences", "")))
+
+    # Import inventory items
+    for item_data in data.get("inventory", []):
+        from datetime import date
+
+        result = await db.execute(
+            select(InventoryItem).where(InventoryItem.barcode == item_data["barcode"])
+        )
+        existing = result.scalar_one_or_none()
+
+        location_id = None
+        if item_data.get("storage_location"):
+            loc_result = await db.execute(
+                select(StorageLocation).where(StorageLocation.name == item_data["storage_location"])
+            )
+            loc = loc_result.scalar_one_or_none()
+            if loc:
+                location_id = loc.id
+
+        exp_date = None
+        if item_data.get("expiration_date"):
+            exp_date = date.fromisoformat(item_data["expiration_date"])
+
+        if existing:
+            existing.quantity = item_data.get("quantity", existing.quantity)
+            existing.name = item_data.get("name", existing.name)
+            existing.category = item_data.get("category", existing.category)
+            existing.storage_location_id = location_id
+            existing.expiration_date = exp_date
+        else:
+            db.add(InventoryItem(
+                barcode=item_data["barcode"],
+                name=item_data.get("name", "Unbekannt"),
+                quantity=item_data.get("quantity", 1),
+                category=item_data.get("category", "Unbekannt"),
+                storage_location_id=location_id,
+                expiration_date=exp_date,
+            ))
+        imported_count += 1
+
+    await db.commit()
+    return {"message": f"{imported_count} Artikel importiert."}

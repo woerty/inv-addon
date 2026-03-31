@@ -68,6 +68,26 @@ export const updateItem = (barcode: string, data: {
 export const deleteItem = (barcode: string) =>
   request<{ message: string }>(`/inventory/${barcode}`, { method: "DELETE" });
 
+export const exportData = async (): Promise<Blob> => {
+  const response = await fetch(`${BASE}/inventory/export`);
+  if (!response.ok) throw new Error("Export fehlgeschlagen");
+  return response.blob();
+};
+
+export const importData = async (file: File): Promise<{ message: string }> => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(`${BASE}/inventory/import`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(error?.detail || "Import fehlgeschlagen");
+  }
+  return response.json();
+};
+
 // Storage Locations
 export const getStorageLocations = () =>
   request<StorageLocation[]>("/storage-locations/");
