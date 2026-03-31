@@ -64,6 +64,50 @@ async def get_inventory(
     return result.scalars().all()
 
 
+@router.post("/relookup/{barcode}")
+async def relookup_barcode(barcode: str, db: AsyncSession = Depends(get_db)):
+    """Re-lookup a barcode across all providers and update the item."""
+    result = await db.execute(
+        select(InventoryItem).where(InventoryItem.barcode == barcode)
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Kein Artikel mit Barcode {barcode} gefunden")
+
+    product = await lookup_barcode(barcode)
+    if product["name"] == "Unbekanntes Produkt":
+        return {"message": "Kein Ergebnis bei allen Providern gefunden.", "updated": False}
+
+    old_name = item.name
+    item.name = product["name"]
+    item.category = product["category"]
+    await _log_action(db, barcode, "update", f"re-lookup: {old_name} → {product['name']}")
+    await db.commit()
+    return {"message": f'Aktualisiert: "{product["name"]}"', "updated": True}
+
+
+@router.post("/relookup-all")
+async def relookup_all_unknown(db: AsyncSession = Depends(get_db)):
+    """Re-lookup all items named 'Unbekanntes Produkt'."""
+    result = await db.execute(
+        select(InventoryItem).where(InventoryItem.name == "Unbekanntes Produkt")
+    )
+    items = result.scalars().all()
+    if not items:
+        return {"message": "Keine unbekannten Produkte gefunden.", "updated": 0}
+
+    updated = 0
+    for item in items:
+        product = await lookup_barcode(item.barcode)
+        if product["name"] != "Unbekanntes Produkt":
+            item.name = product["name"]
+            item.category = product["category"]
+            updated += 1
+
+    await db.commit()
+    return {"message": f"{updated} von {len(items)} Produkten aktualisiert.", "updated": updated}
+
+
 @router.post("/barcode", status_code=201)
 async def add_item_by_barcode(
     req: BarcodeAddRequest,

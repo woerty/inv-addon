@@ -15,9 +15,11 @@ import {
 } from "@mui/material";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import FileUploadIcon from "@mui/icons-material/FileUpload";
+import RefreshIcon from "@mui/icons-material/Refresh";
+import { IconButton } from "@mui/material";
 import { useInventory } from "../hooks/useInventory";
 import { useNotification } from "../components/NotificationProvider";
-import { exportData, importData } from "../api/client";
+import { exportData, importData, relookupBarcode, relookupAllUnknown } from "../api/client";
 
 type SortKey = "name" | "quantity" | "category" | "barcode" | "added_date";
 type Order = "asc" | "desc";
@@ -61,6 +63,26 @@ const InventoryPage = () => {
       notify(err instanceof Error ? err.message : "Import fehlgeschlagen", "error");
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleRelookupAll = async () => {
+    try {
+      const result = await relookupAllUnknown();
+      notify(result.message, result.updated > 0 ? "success" : "info");
+      if (result.updated > 0) refetch();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Fehler", "error");
+    }
+  };
+
+  const handleRelookup = async (barcode: string) => {
+    try {
+      const result = await relookupBarcode(barcode);
+      notify(result.message, result.updated ? "success" : "info");
+      if (result.updated) refetch();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Fehler", "error");
+    }
   };
   const [sortBy, setSortBy] = useState<SortKey>("name");
   const [order, setOrder] = useState<Order>("asc");
@@ -161,6 +183,17 @@ const InventoryPage = () => {
           hidden
           onChange={handleImport}
         />
+        {items.some((i) => i.name === "Unbekanntes Produkt") && (
+          <Button
+            variant="outlined"
+            size="small"
+            color="warning"
+            startIcon={<RefreshIcon />}
+            onClick={handleRelookupAll}
+          >
+            Unbekannte nachschlagen
+          </Button>
+        )}
       </Box>
       <TextField
         label="Suche nach Name oder Kategorie"
@@ -193,7 +226,14 @@ const InventoryPage = () => {
           <TableBody>
             {items.map((item) => (
               <TableRow key={item.id}>
-                <TableCell>{item.name}</TableCell>
+                <TableCell>
+                  {item.name}
+                  {item.name === "Unbekanntes Produkt" && (
+                    <IconButton size="small" onClick={() => handleRelookup(item.barcode)} title="Nochmal nachschlagen">
+                      <RefreshIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                </TableCell>
                 <TableCell>{item.barcode}</TableCell>
                 <TableCell>
                   <TextField

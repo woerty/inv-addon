@@ -68,6 +68,12 @@ export const updateItem = (barcode: string, data: {
 export const deleteItem = (barcode: string) =>
   request<{ message: string }>(`/inventory/${barcode}`, { method: "DELETE" });
 
+export const relookupBarcode = (barcode: string) =>
+  request<{ message: string; updated: boolean }>(`/inventory/relookup/${barcode}`, { method: "POST" });
+
+export const relookupAllUnknown = () =>
+  request<{ message: string; updated: number }>("/inventory/relookup-all", { method: "POST" });
+
 export const exportData = async (): Promise<Blob> => {
   const response = await fetch(`${BASE}/inventory/export`);
   if (!response.ok) throw new Error("Export fehlgeschlagen");
