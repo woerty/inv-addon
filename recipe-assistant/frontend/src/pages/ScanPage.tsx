@@ -101,9 +101,19 @@ const ScanPage = () => {
       </Box>
 
       {lastScanned && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Letzter Scan: {lastScanned}
-        </Typography>
+        <Paper
+          sx={{
+            mt: 1,
+            mb: 1,
+            p: 1.5,
+            bgcolor: "#e8f5e9",
+            textAlign: "center",
+          }}
+        >
+          <Typography variant="body1" fontWeight="bold">
+            Gescannt: {lastScanned}
+          </Typography>
+        </Paper>
       )}
 
       <form onSubmit={handleManualSubmit}>

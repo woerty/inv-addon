@@ -75,6 +75,27 @@ const ScanStationPage = () => {
         <Box sx={{ width: 80 }} />
       </Box>
 
+      {/* Feedback - above camera so it's visible with keyboard open */}
+      <Paper
+        sx={{
+          mx: 2,
+          mt: 1,
+          p: 1.5,
+          textAlign: "center",
+          bgcolor: feedback
+            ? feedback.type === "success"
+              ? "#1b5e20"
+              : "#b71c1c"
+            : "#333",
+          color: "white",
+          borderRadius: 2,
+        }}
+      >
+        <Typography variant="h6" fontWeight="bold">
+          {feedback?.message ?? "Bereit zum Scannen..."}
+        </Typography>
+      </Paper>
+
       {/* Camera */}
       <Box sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", p: 2, position: "relative" }}>
         <video
@@ -137,30 +158,6 @@ const ScanStationPage = () => {
         </Button>
       </Box>
 
-      {/* Feedback */}
-      <Paper
-        sx={{
-          m: 2,
-          mt: 0,
-          p: 2,
-          textAlign: "center",
-          bgcolor: feedback
-            ? feedback.type === "success"
-              ? "#1b5e20"
-              : "#b71c1c"
-            : "#333",
-          color: "white",
-          minHeight: 60,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          borderRadius: 2,
-        }}
-      >
-        <Typography variant="h6" fontWeight="bold">
-          {feedback?.message ?? "Bereit zum Scannen..."}
-        </Typography>
-      </Paper>
     </Box>
   );
 };

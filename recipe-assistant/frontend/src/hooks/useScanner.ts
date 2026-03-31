@@ -1,5 +1,21 @@
 import { useCallback, useRef, useState } from "react";
 
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 1200;
+    gain.gain.value = 0.3;
+    osc.start();
+    osc.stop(ctx.currentTime + 0.15);
+  } catch {
+    // Audio not available
+  }
+}
+
 interface UseScannerOptions {
   onScan: (barcode: string) => void;
   cooldownMs?: number;
@@ -19,6 +35,7 @@ export function useScanner({ onScan, cooldownMs = 2000 }: UseScannerOptions) {
 
       lastBarcodeRef.current = barcode;
       setLastScanned(barcode);
+      playBeep();
       onScan(barcode);
 
       if (cooldownRef.current) clearTimeout(cooldownRef.current);
