@@ -74,13 +74,22 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
     messages: list[dict[str, str]] = [{"role": m.role, "content": m.content} for m in history_rows]
 
     system_suffix = ""
-    if not messages and req.use_ingredients:
-        inv_result = await db.execute(
-            select(InventoryItem.name).where(InventoryItem.quantity > 0)
-        )
-        ingredients = [row[0] for row in inv_result.all()]
-        if ingredients:
-            system_suffix = f"\n\nDer Nutzer hat folgende Zutaten im Haushalt: {', '.join(ingredients)}."
+    if not messages:
+        # Always include person preferences if any exist
+        persons_result = await db.execute(select(Person))
+        persons = persons_result.scalars().all()
+        if persons:
+            prefs = "\n".join(f"- {p.name}: {p.preferences}" for p in persons if p.preferences.strip())
+            if prefs:
+                system_suffix += f"\n\nFolgende Personen leben im Haushalt mit diesen Vorlieben/Einschränkungen:\n{prefs}"
+
+        if req.use_ingredients:
+            inv_result = await db.execute(
+                select(InventoryItem.name).where(InventoryItem.quantity > 0)
+            )
+            ingredients = [row[0] for row in inv_result.all()]
+            if ingredients:
+                system_suffix += f"\n\nDer Nutzer hat folgende Zutaten im Haushalt: {', '.join(ingredients)}."
 
     messages.append({"role": "user", "content": req.message})
 
