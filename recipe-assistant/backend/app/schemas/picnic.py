@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 # --- Status ---
@@ -49,6 +49,12 @@ class ImportDecision(BaseModel):
     scanned_ean: str | None = None
     storage_location: str | None = None
     expiration_date: date | None = None
+
+    @model_validator(mode="after")
+    def _check_action_consistency(self) -> "ImportDecision":
+        if self.action == "match_existing" and not self.target_barcode:
+            raise ValueError("match_existing requires target_barcode")
+        return self
 
 
 class ImportCommitRequest(BaseModel):

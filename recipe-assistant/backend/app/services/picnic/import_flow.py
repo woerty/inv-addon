@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.inventory import InventoryItem
+from app.models.inventory import InventoryItem, StorageLocation
 from app.models.picnic import (
     PicnicDeliveryImport,
     PicnicProduct,
@@ -39,9 +39,11 @@ def _flatten_delivery_items(detail: dict[str, Any]) -> list[dict[str, Any]]:
             if not inner:
                 continue
             product = inner[0]
+            if not isinstance(product, dict) or "id" not in product:
+                continue
             qty = 1
             for deco in line.get("decorators", []):
-                if "quantity" in deco:
+                if isinstance(deco, dict) and "quantity" in deco:
                     qty = deco["quantity"]
                     break
             out.append(
@@ -227,11 +229,16 @@ async def commit_import_decisions(
             continue
 
         if decision.action == "match_existing":
-            assert decision.target_barcode, "match_existing requires target_barcode"
+            # Schema validator already guarantees target_barcode is set for this action.
             result = await session.execute(
                 select(InventoryItem).where(InventoryItem.barcode == decision.target_barcode)
             )
-            item = result.scalar_one()
+            item = result.scalar_one_or_none()
+            if item is None:
+                raise ValueError(
+                    f"match_existing target barcode {decision.target_barcode!r} "
+                    f"not found in inventory"
+                )
             item.quantity += qty
 
             # Cache the pairing on picnic_products so future resolutions are deterministic.
@@ -300,6 +307,9 @@ async def commit_import_decisions(
                     created += 1
             continue
 
+        # Unreachable via HTTP (Pydantic Literal blocks it), but defensive for internal callers.
+        raise ValueError(f"unknown ImportDecision.action: {decision.action!r}")
+
     session.add(
         PicnicDeliveryImport(delivery_id=delivery_id, item_count=len(decisions))
     )
@@ -317,7 +327,6 @@ async def _resolve_location(session: AsyncSession, name: str | None) -> int | No
     """Resolve storage location name -> id, creating the location if missing."""
     if not name:
         return None
-    from app.models.inventory import StorageLocation
     result = await session.execute(select(StorageLocation).where(StorageLocation.name == name))
     loc = result.scalar_one_or_none()
     if loc:
