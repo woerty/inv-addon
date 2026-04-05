@@ -7,8 +7,6 @@ products that resolve to a Picnic SKU via get_article_by_gtin.
 
 from __future__ import annotations
 
-import logging
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,8 +35,6 @@ from app.services.picnic.client import (
     get_picnic_client,
 )
 from app.services.restock import check_and_enqueue
-
-log = logging.getLogger("tracked_products.router")
 
 router = APIRouter()
 
@@ -98,14 +94,21 @@ async def _current_inventory_quantity(db: AsyncSession, barcode: str) -> int:
 
 
 async def _build_read_model(
-    db: AsyncSession, tp: TrackedProduct
+    db: AsyncSession,
+    tp: TrackedProduct,
+    *,
+    current_quantity: int | None = None,
 ) -> TrackedProductRead:
     picnic_row = (
         await db.execute(
             select(PicnicProduct).where(PicnicProduct.picnic_id == tp.picnic_id)
         )
     ).scalar_one_or_none()
-    current_qty = await _current_inventory_quantity(db, tp.barcode)
+    current_qty = (
+        current_quantity
+        if current_quantity is not None
+        else await _current_inventory_quantity(db, tp.barcode)
+    )
     return TrackedProductRead(
         barcode=tp.barcode,
         picnic_id=tp.picnic_id,
@@ -154,7 +157,10 @@ async def resolve_preview(
         raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
     except PicnicReauthRequired:
         raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
-    await db.commit()
+    if row is not None:
+        # Only commit if _resolve_picnic actually upserted (live_lookup path).
+        # cache_hit is a pure read; miss returns early with no writes.
+        await db.commit()
     if row is None:
         return ResolvePreviewResponse(
             resolved=False,
@@ -231,7 +237,7 @@ async def create_tracked(
     current_qty = inventory_row.quantity if inventory_row is not None else 0
     await check_and_enqueue(db, barcode=req.barcode, new_quantity=current_qty)
 
-    result = await _build_read_model(db, tp)
+    result = await _build_read_model(db, tp, current_quantity=current_qty)
     await db.commit()
     return result
 
@@ -272,7 +278,7 @@ async def update_tracked(
     current_qty = await _current_inventory_quantity(db, barcode)
     await check_and_enqueue(db, barcode=barcode, new_quantity=current_qty)
 
-    result = await _build_read_model(db, tp)
+    result = await _build_read_model(db, tp, current_quantity=current_qty)
     await db.commit()
     return result
 
