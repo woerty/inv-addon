@@ -149,7 +149,9 @@ class PicnicClient:
         try:
             result = await self._call("get_article_by_gtin", ean)
         except Exception as e:
-            if "not found" in str(e).lower() or "404" in str(e):
+            msg = str(e).lower()
+            if "not found" in msg or "404" in msg:
+                log.debug("get_article_by_gtin miss for %s: %s", ean, e)
                 return None
             raise
         if not result:

@@ -55,3 +55,11 @@ class FakePicnicClient:
 
     async def get_user(self) -> dict[str, Any]:
         return self.user
+
+
+# Static conformance check: ensures FakePicnicClient stays in sync with
+# PicnicClientProtocol. If the protocol grows a new method, mypy/pyright
+# will flag this line until the fake adds the method too.
+from app.services.picnic.client import PicnicClientProtocol as _Protocol
+
+_protocol_check: _Protocol = FakePicnicClient()
