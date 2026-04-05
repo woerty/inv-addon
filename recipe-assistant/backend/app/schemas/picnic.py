@@ -10,7 +10,30 @@ from pydantic import BaseModel, model_validator
 
 class PicnicStatusResponse(BaseModel):
     enabled: bool
+    needs_login: bool = False  # True when credentials set but token missing / stale
     account: dict | None = None  # {"first_name": ..., "last_name": ..., "email": ...}
+
+
+# --- Login flow (web-based 2FA) ---
+
+class PicnicLoginStartResponse(BaseModel):
+    status: Literal["ok", "awaiting_2fa"]
+
+
+class PicnicLoginSendCodeRequest(BaseModel):
+    channel: Literal["SMS", "EMAIL"] = "SMS"
+
+
+class PicnicLoginSendCodeResponse(BaseModel):
+    status: Literal["sent"] = "sent"
+
+
+class PicnicLoginVerifyRequest(BaseModel):
+    code: str
+
+
+class PicnicLoginVerifyResponse(BaseModel):
+    status: Literal["ok"] = "ok"
 
 
 # --- Import flow ---

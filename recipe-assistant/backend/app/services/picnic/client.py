@@ -32,10 +32,42 @@ class PicnicNotConfigured(Exception):
 class PicnicReauthRequired(Exception):
     """Raised when the cached token is invalid/missing and a fresh login triggers 2FA.
 
-    The user must run `python -m app.services.picnic.setup` interactively to
-    obtain a new token. The HTTP layer surfaces this as a 503 with
-    {"error": "picnic_reauth_required"}.
+    Recovery paths:
+      - The web UI login flow (POST /api/picnic/login/start -> send-code -> verify),
+        which drives app.services.picnic.login.PicnicLoginSession.
+      - The CLI bootstrap `python -m app.services.picnic.setup` as a fallback for
+        headless environments.
+
+    The HTTP layer surfaces this on the runtime code paths as a 503 with
+    {"error": "picnic_reauth_required"}, and on /status it sets
+    needs_login=True so the frontend can render the login screen.
     """
+
+
+def save_token(token: str) -> None:
+    """Persist the auth token to TOKEN_CACHE_PATH with chmod 600.
+
+    Shared between the runtime PicnicClient (after a successful silent
+    re-login) and the web-based PicnicLoginSession (after a successful
+    interactive 2FA handshake).
+    """
+    try:
+        TOKEN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        TOKEN_CACHE_PATH.write_text(json.dumps({"token": token}))
+        TOKEN_CACHE_PATH.chmod(0o600)
+    except Exception as e:
+        log.warning("could not persist picnic token: %s", e)
+
+
+def reset_picnic_client() -> None:
+    """Force the runtime PicnicClient singleton to rebuild on next use.
+
+    Called after a successful fresh login (web flow) so the next
+    /api/picnic/* call picks up the new token instead of the stale
+    in-memory instance.
+    """
+    global _client_singleton
+    _client_singleton = None
 
 
 def _is_auth_error(exc: Exception) -> bool:
@@ -67,12 +99,9 @@ class PicnicClient:
         return None
 
     def _save_token(self, token: str) -> None:
-        try:
-            TOKEN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            TOKEN_CACHE_PATH.write_text(json.dumps({"token": token}))
-            TOKEN_CACHE_PATH.chmod(0o600)
-        except Exception as e:
-            log.warning("could not persist picnic token: %s", e)
+        # Delegate to the module-level helper so there's one canonical
+        # implementation shared with PicnicLoginSession.
+        save_token(token)
 
     async def _ensure_ready(self, force_relogin: bool = False) -> None:
         if self._inner is not None and not force_relogin:

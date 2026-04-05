@@ -5,10 +5,12 @@ All business logic lives in app.services.picnic.*. This module's jobs are:
   - Own the database transaction boundary (commit after each mutating call;
     services only flush)
   - Map service exceptions to HTTP status codes:
-      PicnicNotConfigured  -> 503 {"error": "picnic_not_configured"}
-      PicnicReauthRequired -> 503 {"error": "picnic_reauth_required"}
-      ValueError           -> 409 (already imported / missing target barcode)
-      other unexpected     -> 500 (logged via log.exception, handled by FastAPI)
+      PicnicNotConfigured      -> 503 {"error": "picnic_not_configured"}
+      PicnicReauthRequired     -> 503 {"error": "picnic_reauth_required"}
+      PicnicLoginNotInProgress -> 409 {"error": "no_login_in_progress"}
+      PicnicLoginInvalidCode   -> 400 {"error": "invalid_2fa_code"}
+      ValueError               -> 409 (already imported / missing target barcode)
+      other unexpected         -> 500 (logged via log.exception, handled by FastAPI)
 
 Tests swap the Picnic client by overriding the get_picnic_client dependency:
     app.dependency_overrides[get_picnic_client] = lambda: FakePicnicClient()
@@ -30,6 +32,11 @@ from app.schemas.picnic import (
     ImportCommitRequest,
     ImportCommitResponse,
     ImportFetchResponse,
+    PicnicLoginSendCodeRequest,
+    PicnicLoginSendCodeResponse,
+    PicnicLoginStartResponse,
+    PicnicLoginVerifyRequest,
+    PicnicLoginVerifyResponse,
     PicnicProductCacheEntry,
     PicnicSearchResponse,
     PicnicSearchResult,
@@ -49,6 +56,12 @@ from app.services.picnic.client import (
 from app.services.picnic.import_flow import (
     commit_import_decisions,
     fetch_import_candidates,
+)
+from app.services.picnic.login import (
+    PicnicLoginInvalidCode,
+    PicnicLoginNotInProgress,
+    PicnicLoginSession,
+    get_login_session,
 )
 
 log = logging.getLogger("picnic.router")
@@ -74,11 +87,12 @@ def _require_enabled():
 @router.get("/status", response_model=PicnicStatusResponse)
 async def status(client: PicnicClientProtocol = Depends(get_picnic_client)):
     if not _feature_enabled():
-        return PicnicStatusResponse(enabled=False, account=None)
+        return PicnicStatusResponse(enabled=False, needs_login=False, account=None)
     try:
         user = await client.get_user()
         return PicnicStatusResponse(
             enabled=True,
+            needs_login=False,
             account={
                 "first_name": user.get("firstname"),
                 "last_name": user.get("lastname"),
@@ -86,18 +100,84 @@ async def status(client: PicnicClientProtocol = Depends(get_picnic_client)):
             },
         )
     except PicnicNotConfigured:
-        return PicnicStatusResponse(enabled=False, account=None)
+        return PicnicStatusResponse(enabled=False, needs_login=False, account=None)
     except PicnicReauthRequired:
         # Feature is configured but the cached token is gone and 2FA is required.
-        # Report as disabled so the frontend hides the UI; a banner should tell
-        # the user to run the setup CLI.
-        return PicnicStatusResponse(enabled=False, account=None)
+        # Frontend renders a login screen instead of the normal Picnic UI.
+        return PicnicStatusResponse(enabled=False, needs_login=True, account=None)
     except Exception as e:
         # Broad catch so any upstream surprise becomes a clean 503, but log
         # with traceback so programming bugs aren't silently disguised as
         # auth failures.
         log.exception("picnic /status probe failed unexpectedly")
         raise HTTPException(status_code=503, detail={"error": "picnic_auth_failed", "detail": str(e)})
+
+
+@router.post("/login/start", response_model=PicnicLoginStartResponse)
+async def login_start(
+    session: PicnicLoginSession = Depends(get_login_session),
+):
+    _require_enabled()
+    try:
+        result = await session.start()
+        return PicnicLoginStartResponse(status=result)
+    except PicnicNotConfigured:
+        raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
+    except Exception as e:
+        log.exception("picnic login start failed")
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "picnic_login_failed", "detail": str(e)},
+        )
+
+
+@router.post("/login/send-code", response_model=PicnicLoginSendCodeResponse)
+async def login_send_code(
+    req: PicnicLoginSendCodeRequest,
+    session: PicnicLoginSession = Depends(get_login_session),
+):
+    _require_enabled()
+    try:
+        await session.send_code(req.channel)
+        return PicnicLoginSendCodeResponse()
+    except PicnicLoginNotInProgress:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "no_login_in_progress"},
+        )
+    except Exception as e:
+        log.exception("picnic login send-code failed")
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "picnic_send_code_failed", "detail": str(e)},
+        )
+
+
+@router.post("/login/verify", response_model=PicnicLoginVerifyResponse)
+async def login_verify(
+    req: PicnicLoginVerifyRequest,
+    session: PicnicLoginSession = Depends(get_login_session),
+):
+    _require_enabled()
+    try:
+        await session.verify(req.code)
+        return PicnicLoginVerifyResponse()
+    except PicnicLoginNotInProgress:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "no_login_in_progress"},
+        )
+    except PicnicLoginInvalidCode:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_2fa_code"},
+        )
+    except Exception as e:
+        log.exception("picnic login verify failed")
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "picnic_verify_failed", "detail": str(e)},
+        )
 
 
 @router.post("/import/fetch", response_model=ImportFetchResponse)
