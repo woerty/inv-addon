@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   CardContent,
+  Chip,
   FormControl,
   InputLabel,
   MenuItem,
@@ -11,16 +12,19 @@ import {
   Typography,
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material";
-import type { ImportCandidate, ImportDecision } from "../../types";
+import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
+import type { ImportCandidate, ImportDecision, TrackedProduct } from "../../types";
 import { MatchCandidateList } from "./MatchCandidateList";
 
 interface Props {
   candidate: ImportCandidate;
   storageLocations: string[];
   onChange: (decision: ImportDecision) => void;
+  synthTracked?: TrackedProduct | null;
+  onPromote?: (tracked: TrackedProduct) => void;
 }
 
-export function ReviewCard({ candidate, storageLocations, onChange }: Props) {
+export function ReviewCard({ candidate, storageLocations, onChange, synthTracked, onPromote }: Props) {
   const confident = candidate.best_confidence >= 92;
   const initialAction = confident ? "match_existing" : "skip";
   const initialTarget = confident ? (candidate.match_suggestions[0]?.inventory_barcode ?? null) : null;
@@ -62,6 +66,21 @@ export function ReviewCard({ candidate, storageLocations, onChange }: Props) {
             </Typography>
           </Box>
         </Box>
+
+        {synthTracked && (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+            <Chip label="Abonniert · Barcode fehlt" size="small" color="warning" />
+            {onPromote && (
+              <Button
+                size="small"
+                startIcon={<QrCodeScannerIcon />}
+                onClick={() => onPromote(synthTracked)}
+              >
+                Barcode nachpflegen
+              </Button>
+            )}
+          </Box>
+        )}
 
         {/* Action selector */}
         <Box sx={{ display: "flex", gap: 1, mb: 2 }}>

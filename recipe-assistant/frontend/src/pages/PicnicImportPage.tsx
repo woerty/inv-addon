@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, Paper, Typography } from "@mui/material";
 import { usePicnicImport } from "../hooks/usePicnic";
 import { getStorageLocations } from "../api/client";
-import type { ImportDecision } from "../types";
+import type { ImportDecision, TrackedProduct } from "../types";
 import { ReviewCard } from "../components/picnic/ReviewCard";
+import { useTrackedProducts } from "../hooks/useTrackedProducts";
+import { useNotification } from "../components/NotificationProvider";
+import PromoteBarcodeDialog from "../components/picnic/PromoteBarcodeDialog";
 
 export default function PicnicImportPage() {
   const { data, loading, error, fetchImport, commit } = usePicnicImport();
@@ -13,6 +16,31 @@ export default function PicnicImportPage() {
   useEffect(() => {
     getStorageLocations().then((locs) => setStorageLocations(locs.map((l) => l.name)));
   }, []);
+
+  const { items: tracked, promote } = useTrackedProducts();
+  const { notify } = useNotification();
+  const [promoteTarget, setPromoteTarget] = useState<TrackedProduct | null>(null);
+
+  const trackedByPicnicId = useMemo(
+    () =>
+      Object.fromEntries(
+        tracked
+          .filter((t) => t.barcode.startsWith("picnic:"))
+          .map((t) => [t.picnic_id, t])
+      ),
+    [tracked]
+  );
+
+  const handlePromote = async (synthBarcode: string, newBarcode: string) => {
+    const result = await promote(synthBarcode, newBarcode);
+    notify(
+      result.merged
+        ? "Barcode übernommen (bestehende Regel ersetzt)"
+        : "Barcode übernommen",
+      "success"
+    );
+    return result;
+  };
 
   const handleDecision = (d: ImportDecision) => {
     setDecisions((prev) => ({ ...prev, [d.picnic_id]: d }));
@@ -68,6 +96,8 @@ export default function PicnicImportPage() {
               candidate={item}
               storageLocations={storageLocations}
               onChange={handleDecision}
+              synthTracked={trackedByPicnicId[item.picnic_id] ?? null}
+              onPromote={setPromoteTarget}
             />
           ))}
           <Button
@@ -80,6 +110,11 @@ export default function PicnicImportPage() {
           </Button>
         </Box>
       ))}
+      <PromoteBarcodeDialog
+        tracked={promoteTarget}
+        onClose={() => setPromoteTarget(null)}
+        onPromote={handlePromote}
+      />
     </Paper>
   );
 }
