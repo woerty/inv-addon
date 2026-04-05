@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.database import Base, engine
-from app.routers import inventory, storage, assistant, persons, picnic
+from app.routers import inventory, storage, assistant, persons, picnic, tracked_products
 
 
 @asynccontextmanager
@@ -37,6 +37,11 @@ app.include_router(storage.router, prefix="/api/storage-locations", tags=["stora
 app.include_router(assistant.router, prefix="/api/assistant", tags=["assistant"])
 app.include_router(persons.router, prefix="/api/persons", tags=["persons"])
 app.include_router(picnic.router, prefix="/api/picnic", tags=["picnic"])
+app.include_router(
+    tracked_products.router,
+    prefix="/api/tracked-products",
+    tags=["tracked-products"],
+)
 
 # Serve frontend static files in production
 FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend" / "build"
