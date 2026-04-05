@@ -14,10 +14,16 @@
   "map": ["config:rw", "data:rw"],
   "options": {
     "anthropic_api_key": "",
-    "openai_api_key": ""
+    "openai_api_key": "",
+    "picnic_email": "",
+    "picnic_password": "",
+    "picnic_country_code": "DE"
   },
   "schema": {
     "anthropic_api_key": "password",
-    "openai_api_key": "password"
+    "openai_api_key": "password",
+    "picnic_email": "str?",
+    "picnic_password": "password?",
+    "picnic_country_code": "str?"
   }
 }

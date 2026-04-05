@@ -35,7 +35,9 @@ RUN pip install --no-cache-dir \
     "httpx>=0.28.0" \
     "anthropic>=0.43.0" \
     "openai>=1.60.0" \
-    "python-multipart>=0.0.18"
+    "python-multipart>=0.0.18" \
+    "python-picnic-api2>=1.3.0" \
+    "rapidfuzz>=3.10.0"
 
 # Copy backend
 COPY backend/ ./backend/
