@@ -10,6 +10,7 @@ import PersonsPage from "./pages/PersonsPage";
 import PicnicImportPage from "./pages/PicnicImportPage";
 import PicnicLoginPage from "./pages/PicnicLoginPage";
 import ShoppingListPage from "./pages/ShoppingListPage";
+import TrackedProductsPage from "./pages/TrackedProductsPage";
 
 const AppContent = () => {
   const location = useLocation();
@@ -28,6 +29,7 @@ const AppContent = () => {
         <Route path="/picnic-import" element={<PicnicImportPage />} />
         <Route path="/picnic-login" element={<PicnicLoginPage />} />
         <Route path="/shopping-list" element={<ShoppingListPage />} />
+        <Route path="/tracked-products" element={<TrackedProductsPage />} />
       </Routes>
     </>
   );
