@@ -18,7 +18,10 @@ import CropFreeIcon from "@mui/icons-material/CropFree";
 import RestaurantIcon from "@mui/icons-material/Restaurant";
 import ChatIcon from "@mui/icons-material/Chat";
 import PeopleIcon from "@mui/icons-material/People";
+import LocalGroceryStoreIcon from "@mui/icons-material/LocalGroceryStore";
+import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import { useNavigate, useLocation } from "react-router-dom";
+import { usePicnicStatus } from "../hooks/usePicnic";
 
 const NAV_ITEMS = [
   { path: "/", label: "Inventar", icon: <InventoryIcon /> },
@@ -33,6 +36,17 @@ const Navbar = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const { status } = usePicnicStatus();
+
+  const navItems = [
+    ...NAV_ITEMS,
+    ...(status?.enabled
+      ? [
+          { path: "/picnic-import", label: "Picnic-Import", icon: <LocalGroceryStoreIcon /> },
+          { path: "/shopping-list", label: "Einkaufsliste", icon: <ShoppingCartIcon /> },
+        ]
+      : []),
+  ];
 
   const handleNav = (path: string) => {
     navigate(path);
@@ -64,7 +78,7 @@ const Navbar = () => {
       >
         <Box sx={{ width: 250, pt: 1 }}>
           <List>
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <ListItemButton
                 key={item.path}
                 selected={location.pathname === item.path}
