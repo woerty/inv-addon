@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,7 +27,8 @@ class PicnicProduct(Base):
     image_id: Mapped[str | None] = mapped_column(String, nullable=True)
     last_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_seen: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime, nullable=False, default=lambda: datetime.now(UTC),
+        server_default=func.now(), onupdate=func.now()
     )
 
 
