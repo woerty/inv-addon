@@ -123,3 +123,39 @@ export interface CartSyncResponse {
   failed_count: number;
   skipped_count: number;
 }
+
+// Tracked products (auto-restock)
+export interface TrackedProduct {
+  barcode: string;
+  picnic_id: string;
+  name: string;
+  picnic_name: string;
+  picnic_image_id: string | null;
+  picnic_unit_quantity: string | null;
+  min_quantity: number;
+  target_quantity: number;
+  current_quantity: number;
+  below_threshold: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TrackedProductCreate {
+  barcode: string;
+  min_quantity: number;
+  target_quantity: number;
+}
+
+export interface TrackedProductUpdate {
+  min_quantity?: number;
+  target_quantity?: number;
+}
+
+export interface ResolvePreview {
+  resolved: boolean;
+  picnic_id: string | null;
+  picnic_name: string | null;
+  picnic_image_id: string | null;
+  picnic_unit_quantity: string | null;
+  reason: string | null;
+}

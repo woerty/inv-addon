@@ -13,6 +13,10 @@ import type {
   ShoppingListItem as PicnicShoppingListItem,
   PicnicSearchResult,
   CartSyncResponse,
+  TrackedProduct,
+  TrackedProductCreate,
+  TrackedProductUpdate,
+  ResolvePreview,
 } from "../types";
 
 const BASE = "./api";
@@ -226,4 +230,35 @@ export const verifyPicnicLoginCode = (code: string) =>
   request<{ status: "ok" }>("/picnic/login/verify", {
     method: "POST",
     body: JSON.stringify({ code }),
+  });
+
+// Tracked products (auto-restock)
+export const listTrackedProducts = () =>
+  request<TrackedProduct[]>("/tracked-products");
+
+export const createTrackedProduct = (data: TrackedProductCreate) =>
+  request<TrackedProduct>("/tracked-products", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+export const updateTrackedProduct = (
+  barcode: string,
+  data: TrackedProductUpdate
+) =>
+  request<TrackedProduct>(`/tracked-products/${encodeURIComponent(barcode)}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+
+export const deleteTrackedProduct = (barcode: string) =>
+  request<{ message: string }>(
+    `/tracked-products/${encodeURIComponent(barcode)}`,
+    { method: "DELETE" }
+  );
+
+export const resolveTrackedProductPreview = (barcode: string) =>
+  request<ResolvePreview>("/tracked-products/resolve-preview", {
+    method: "POST",
+    body: JSON.stringify({ barcode }),
   });
