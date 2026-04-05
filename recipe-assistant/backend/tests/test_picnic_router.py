@@ -16,9 +16,11 @@ def override_picnic_client(monkeypatch):
     # Clear settings cache
     from app.config import get_settings
     get_settings.cache_clear()
-    yield fake
-    app.dependency_overrides.pop(get_picnic_client, None)
-    get_settings.cache_clear()
+    try:
+        yield fake
+    finally:
+        app.dependency_overrides.pop(get_picnic_client, None)
+        get_settings.cache_clear()
 
 
 @pytest.mark.asyncio

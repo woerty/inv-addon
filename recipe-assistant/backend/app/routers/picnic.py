@@ -1,4 +1,22 @@
+"""HTTP façade for the Picnic grocery integration.
+
+All business logic lives in app.services.picnic.*. This module's jobs are:
+  - Validate requests (via Pydantic schemas)
+  - Own the database transaction boundary (commit after each mutating call;
+    services only flush)
+  - Map service exceptions to HTTP status codes:
+      PicnicNotConfigured  -> 503 {"error": "picnic_not_configured"}
+      PicnicReauthRequired -> 503 {"error": "picnic_reauth_required"}
+      ValueError           -> 409 (already imported / missing target barcode)
+      other unexpected     -> 500 (logged via log.exception, handled by FastAPI)
+
+Tests swap the Picnic client by overriding the get_picnic_client dependency:
+    app.dependency_overrides[get_picnic_client] = lambda: FakePicnicClient()
+"""
+
 from __future__ import annotations
+
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -33,7 +51,11 @@ from app.services.picnic.import_flow import (
     fetch_import_candidates,
 )
 
+log = logging.getLogger("picnic.router")
+
 router = APIRouter()
+
+MAX_SEARCH_RESULTS = 50
 
 
 def _feature_enabled() -> bool:
@@ -71,6 +93,10 @@ async def status(client: PicnicClientProtocol = Depends(get_picnic_client)):
         # the user to run the setup CLI.
         return PicnicStatusResponse(enabled=False, account=None)
     except Exception as e:
+        # Broad catch so any upstream surprise becomes a clean 503, but log
+        # with traceback so programming bugs aren't silently disguised as
+        # auth failures.
+        log.exception("picnic /status probe failed unexpectedly")
         raise HTTPException(status_code=503, detail={"error": "picnic_auth_failed", "detail": str(e)})
 
 
@@ -114,13 +140,23 @@ async def search(
     db: AsyncSession = Depends(get_db),
 ):
     """Free-text Picnic catalog search. Optional fallback for the rare case
-    where an inventory item has no EAN or get_article_by_gtin missed."""
+    where an inventory item has no EAN or get_article_by_gtin missed.
+
+    Capped at MAX_SEARCH_RESULTS entries per request to bound catalog upsert
+    cost. Short queries (<2 chars) are rejected to avoid cheap abuse.
+    """
     _require_enabled()
+    if len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail={"error": "query_too_short"})
     raw = await client.search(q)
     # python-picnic-api2 returns list of groups; flatten items
     results: list[PicnicSearchResult] = []
     for group in raw:
+        if len(results) >= MAX_SEARCH_RESULTS:
+            break
         for item in group.get("items", []):
+            if len(results) >= MAX_SEARCH_RESULTS:
+                break
             pid = item.get("id")
             if not pid:
                 continue
