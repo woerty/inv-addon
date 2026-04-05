@@ -27,7 +27,7 @@ class PicnicProduct(Base):
     image_id: Mapped[str | None] = mapped_column(String, nullable=True)
     last_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_seen: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(UTC),
+        DateTime, nullable=False, default=lambda: datetime.now(UTC).replace(tzinfo=None),
         server_default=func.now(), onupdate=func.now()
     )
 
