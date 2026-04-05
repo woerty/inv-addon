@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models.inventory import InventoryItem, StorageLocation
 from app.models.log import InventoryLog
 from app.models.person import Person
+from app.models.tracked_product import TrackedProduct
 from app.schemas.inventory import (
     BarcodeAddRequest,
     BarcodeRemoveRequest,
@@ -24,7 +25,6 @@ from app.schemas.inventory import (
 )
 from app.services.barcode import lookup_barcode
 from app.services.restock import check_and_enqueue
-from app.models.tracked_product import TrackedProduct
 
 router = APIRouter()
 
@@ -59,8 +59,9 @@ async def _apply_decrement(
     - Sets item.quantity = new_quantity.
     - If new_quantity == 0 and the product has a TrackedProduct rule,
       the row is kept (zombie); otherwise it is deleted.
-    - Runs restock.check_and_enqueue, which may upsert a ShoppingListItem
-      in the same transaction.
+    - Runs restock.check_and_enqueue when the row is kept (may upsert a
+      ShoppingListItem in the same transaction); skipped on the delete
+      branch because there is no tracked rule to check against.
     - Writes an InventoryLog entry with the given action and details.
 
     Returns True if the inventory row was deleted, False if it was kept.
@@ -79,7 +80,9 @@ async def _apply_decrement(
 
     item.quantity = new_quantity
     await _log_action(db, item.barcode, action, log_details)
-    await check_and_enqueue(db, barcode=item.barcode, new_quantity=new_quantity)
+    await check_and_enqueue(
+        db, barcode=item.barcode, new_quantity=new_quantity, tracked=tracked
+    )
     return False
 
 

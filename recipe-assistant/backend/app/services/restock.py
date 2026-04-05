@@ -32,6 +32,8 @@ async def check_and_enqueue(
     db: AsyncSession,
     barcode: str,
     new_quantity: int,
+    *,
+    tracked: TrackedProduct | None = None,
 ) -> RestockResult | None:
     """Check if `new_quantity` crossed the threshold for `barcode` and
     upsert the shopping list accordingly.
@@ -40,14 +42,19 @@ async def check_and_enqueue(
     db.commit(). Runs in the caller's transaction — either both writes
     land or neither. This function does not commit.
 
+    If the caller already has the TrackedProduct row (e.g. they queried
+    it to make a delete decision), pass it via the `tracked` kwarg to
+    avoid a duplicate SELECT. Otherwise the function queries it itself.
+
     Returns None if no tracked rule exists or if new_quantity >= min_quantity.
     Returns RestockResult(...) if the shopping list was upserted.
     """
-    tracked = (
-        await db.execute(
-            select(TrackedProduct).where(TrackedProduct.barcode == barcode)
-        )
-    ).scalar_one_or_none()
+    if tracked is None:
+        tracked = (
+            await db.execute(
+                select(TrackedProduct).where(TrackedProduct.barcode == barcode)
+            )
+        ).scalar_one_or_none()
     if tracked is None:
         return None
     if new_quantity >= tracked.min_quantity:
