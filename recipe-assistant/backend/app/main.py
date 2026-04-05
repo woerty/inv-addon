@@ -14,7 +14,16 @@ from app.routers import inventory, storage, assistant, persons
 async def lifespan(app: FastAPI):
     # In dev mode with SQLite: auto-create tables
     if "sqlite" in get_settings().database_url:
-        from app.models import InventoryItem, StorageLocation, ChatMessage, InventoryLog  # noqa: F401
+        from app.models import (  # noqa: F401
+            InventoryItem,
+            StorageLocation,
+            ChatMessage,
+            InventoryLog,
+            Person,
+            PicnicProduct,
+            PicnicDeliveryImport,
+            ShoppingListItem,
+        )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     yield
