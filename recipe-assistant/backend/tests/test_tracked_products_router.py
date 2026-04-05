@@ -193,3 +193,60 @@ async def test_feature_disabled_returns_503(client: AsyncClient, monkeypatch):
     response = await client.get("/api/tracked-products")
     assert response.status_code == 503
     assert response.json()["detail"]["error"] == "picnic_not_configured"
+
+
+@pytest.mark.asyncio
+async def test_create_synth_barcode_from_picnic_id(client: AsyncClient):
+    """Subscribe from store browser: no barcode, just picnic_id + name."""
+    response = await client.post(
+        "/api/tracked-products",
+        json={
+            "picnic_id": "s100",
+            "name": "Ja! Vollmilch 1 L",
+            "min_quantity": 1,
+            "target_quantity": 4,
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["barcode"] == "picnic:s100"
+    assert data["picnic_id"] == "s100"
+    assert data["name"] == "Ja! Vollmilch 1 L"
+    assert data["min_quantity"] == 1
+    assert data["target_quantity"] == 4
+
+
+@pytest.mark.asyncio
+async def test_create_synth_duplicate_returns_409(client: AsyncClient):
+    payload = {
+        "picnic_id": "s100",
+        "name": "Ja! Vollmilch 1 L",
+        "min_quantity": 1,
+        "target_quantity": 4,
+    }
+    await client.post("/api/tracked-products", json=payload)
+    response = await client.post("/api/tracked-products", json=payload)
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_create_synth_missing_picnic_id_returns_422(client: AsyncClient):
+    """barcode=null without picnic_id should fail validation."""
+    response = await client.post(
+        "/api/tracked-products",
+        json={"min_quantity": 1, "target_quantity": 4},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_with_real_barcode_still_works(client: AsyncClient):
+    """Existing creation path (barcode + Picnic GTIN lookup) must remain unchanged."""
+    response = await client.post(
+        "/api/tracked-products",
+        json={"barcode": "4014400900057", "min_quantity": 1, "target_quantity": 4},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["barcode"] == "4014400900057"
+    assert data["picnic_id"] == "s100"

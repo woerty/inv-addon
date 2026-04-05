@@ -35,6 +35,7 @@ from app.services.picnic.client import (
     get_picnic_client,
 )
 from app.services.restock import check_and_enqueue
+from app.services.tracked_products import is_synthetic_barcode, make_synthetic_barcode
 
 router = APIRouter()
 
@@ -188,43 +189,58 @@ async def create_tracked(
 ):
     _require_enabled()
 
+    # Determine the effective barcode: real (user-supplied) or synthetic.
+    if req.barcode is not None:
+        effective_barcode = req.barcode
+    else:
+        # Store-browser path: barcode=null, picnic_id required (validated by schema).
+        effective_barcode = make_synthetic_barcode(req.picnic_id)
+
     # Reject duplicate up front before hitting Picnic API.
     existing = (
         await db.execute(
-            select(TrackedProduct).where(TrackedProduct.barcode == req.barcode)
+            select(TrackedProduct).where(TrackedProduct.barcode == effective_barcode)
         )
     ).scalar_one_or_none()
     if existing is not None:
         raise HTTPException(
             status_code=409,
-            detail={"error": "already_tracked", "barcode": req.barcode},
+            detail={"error": "already_tracked", "barcode": effective_barcode},
         )
 
-    # Resolve against Picnic (required for creation).
-    try:
-        picnic_row, _reason = await _resolve_picnic(db, client, req.barcode)
-    except PicnicNotConfigured:
-        raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
-    except PicnicReauthRequired:
-        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
+    if req.barcode is not None:
+        # Classic path: resolve Picnic mapping from barcode via get_article_by_gtin.
+        try:
+            picnic_row, _reason = await _resolve_picnic(db, client, req.barcode)
+        except PicnicNotConfigured:
+            raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
+        except PicnicReauthRequired:
+            raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
 
-    if picnic_row is None:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "picnic_product_not_found", "barcode": req.barcode},
-        )
+        if picnic_row is None:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "picnic_product_not_found", "barcode": req.barcode},
+            )
 
-    # Prefer the inventory row's name (user-custom) over Picnic's, if present.
-    inventory_row = (
-        await db.execute(
-            select(InventoryItem).where(InventoryItem.barcode == req.barcode)
-        )
-    ).scalar_one_or_none()
-    display_name = inventory_row.name if inventory_row is not None else picnic_row.name
+        # Prefer the inventory row's name (user-custom) over Picnic's, if present.
+        inventory_row = (
+            await db.execute(
+                select(InventoryItem).where(InventoryItem.barcode == req.barcode)
+            )
+        ).scalar_one_or_none()
+        display_name = inventory_row.name if inventory_row is not None else picnic_row.name
+        picnic_id = picnic_row.picnic_id
+        current_qty = inventory_row.quantity if inventory_row is not None else 0
+    else:
+        # Synth path: picnic_id and name come directly from the request.
+        display_name = req.name or req.picnic_id
+        picnic_id = req.picnic_id
+        current_qty = 0  # No inventory item for synth-subscribed products.
 
     tp = TrackedProduct(
-        barcode=req.barcode,
-        picnic_id=picnic_row.picnic_id,
+        barcode=effective_barcode,
+        picnic_id=picnic_id,
         name=display_name,
         min_quantity=req.min_quantity,
         target_quantity=req.target_quantity,
@@ -234,8 +250,7 @@ async def create_tracked(
 
     # Immediate check: if the inventory quantity is already below the new
     # threshold, seed the shopping list in the same transaction.
-    current_qty = inventory_row.quantity if inventory_row is not None else 0
-    await check_and_enqueue(db, barcode=req.barcode, new_quantity=current_qty)
+    await check_and_enqueue(db, barcode=effective_barcode, new_quantity=current_qty)
 
     result = await _build_read_model(db, tp, current_quantity=current_qty)
     await db.commit()

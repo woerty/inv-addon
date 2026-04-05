@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class TrackedProductCreate(BaseModel):
-    barcode: str = Field(min_length=1)
+    barcode: str | None = Field(default=None, min_length=1)
+    picnic_id: str | None = Field(default=None, min_length=1)
+    name: str | None = Field(default=None, min_length=1)
     min_quantity: int = Field(ge=0)
     target_quantity: int = Field(gt=0)
 
@@ -14,6 +16,12 @@ class TrackedProductCreate(BaseModel):
     def _target_gt_min(self) -> "TrackedProductCreate":
         if self.target_quantity <= self.min_quantity:
             raise ValueError("target_quantity must be greater than min_quantity")
+        return self
+
+    @model_validator(mode="after")
+    def _barcode_or_picnic_id(self) -> "TrackedProductCreate":
+        if not self.barcode and not self.picnic_id:
+            raise ValueError("either barcode or picnic_id must be provided")
         return self
 
 
@@ -50,3 +58,14 @@ class ResolvePreviewResponse(BaseModel):
     picnic_image_id: str | None = None
     picnic_unit_quantity: str | None = None
     reason: str | None = None  # "cache_hit" | "live_lookup" | "not_in_picnic_catalog"
+
+
+class PromoteBarcodeRequest(BaseModel):
+    new_barcode: str = Field(min_length=1)
+
+
+class PromoteBarcodeResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    tracked: TrackedProductRead
+    merged: bool
