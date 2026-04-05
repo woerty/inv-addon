@@ -17,6 +17,8 @@ from app.models.inventory import InventoryItem
 from app.models.picnic import PicnicProduct
 from app.models.tracked_product import TrackedProduct
 from app.schemas.tracked_product import (
+    PromoteBarcodeRequest,
+    PromoteBarcodeResponse,
     ResolvePreviewRequest,
     ResolvePreviewResponse,
     TrackedProductCreate,
@@ -25,6 +27,7 @@ from app.schemas.tracked_product import (
 )
 from app.services.picnic.catalog import (
     PicnicProductData,
+    get_product,
     get_product_by_ean,
     upsert_product,
 )
@@ -311,3 +314,77 @@ async def delete_tracked(barcode: str, db: AsyncSession = Depends(get_db)):
     await db.delete(tp)
     await db.commit()
     return {"message": "deleted"}
+
+
+@router.post(
+    "/{barcode}/promote-barcode",
+    response_model=PromoteBarcodeResponse,
+)
+async def promote_barcode(
+    barcode: str,
+    req: PromoteBarcodeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Promote a synthetic barcode to a real EAN.
+
+    If ``new_barcode`` already exists as a tracked-product PK, the existing
+    real row is deleted and the synth row absorbs its position ("promoted
+    synth wins" merge semantics).
+    """
+    _require_enabled()
+
+    synth_row = (
+        await db.execute(
+            select(TrackedProduct).where(TrackedProduct.barcode == barcode)
+        )
+    ).scalar_one_or_none()
+    if synth_row is None:
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
+
+    if not is_synthetic_barcode(synth_row.barcode):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "already_real_barcode"},
+        )
+
+    new_barcode = req.new_barcode.strip()
+    if is_synthetic_barcode(new_barcode):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_new_barcode"},
+        )
+
+    # Check for PK collision with an existing real-barcode row.
+    existing_real = (
+        await db.execute(
+            select(TrackedProduct).where(TrackedProduct.barcode == new_barcode)
+        )
+    ).scalar_one_or_none()
+    merged = existing_real is not None
+    if merged:
+        await db.delete(existing_real)
+        await db.flush()
+
+    # PK change via delete + insert (SQLAlchemy PK mutations are fragile).
+    preserved = {
+        "picnic_id": synth_row.picnic_id,
+        "name": synth_row.name,
+        "min_quantity": synth_row.min_quantity,
+        "target_quantity": synth_row.target_quantity,
+        "created_at": synth_row.created_at,
+    }
+    await db.delete(synth_row)
+    await db.flush()
+
+    promoted = TrackedProduct(barcode=new_barcode, **preserved)
+    db.add(promoted)
+    await db.flush()
+
+    # Also update the PicnicProduct cache row with the newly-learned EAN.
+    picnic_product = await get_product(db, preserved["picnic_id"])
+    if picnic_product is not None and picnic_product.ean is None:
+        picnic_product.ean = new_barcode
+
+    read_model = await _build_read_model(db, promoted)
+    await db.commit()
+    return PromoteBarcodeResponse(tracked=read_model, merged=merged)
