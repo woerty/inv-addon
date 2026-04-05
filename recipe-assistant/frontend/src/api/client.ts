@@ -4,6 +4,13 @@ import type {
   Recipe,
   ChatMessage,
   Person,
+  PicnicStatus,
+  ImportFetchResponse,
+  ImportDecision,
+  ImportCommitResponse,
+  ShoppingListItem as PicnicShoppingListItem,
+  PicnicSearchResult,
+  CartSyncResponse,
 } from "../types";
 
 const BASE = "./api";
@@ -151,3 +158,45 @@ export const getChatHistory = (sessionId: string) =>
   request<{ messages: ChatMessage[]; session_id: string }>(
     `/assistant/chat/history/${sessionId}`
   );
+
+// Picnic
+export const getPicnicStatus = () =>
+  request<PicnicStatus>("/picnic/status");
+
+export const fetchPicnicImport = () =>
+  request<ImportFetchResponse>("/picnic/import/fetch", { method: "POST" });
+
+export const commitPicnicImport = (delivery_id: string, decisions: ImportDecision[]) =>
+  request<ImportCommitResponse>("/picnic/import/commit", {
+    method: "POST",
+    body: JSON.stringify({ delivery_id, decisions }),
+  });
+
+export const searchPicnic = (q: string) =>
+  request<{ results: PicnicSearchResult[] }>(`/picnic/search?q=${encodeURIComponent(q)}`);
+
+export const getShoppingList = () =>
+  request<PicnicShoppingListItem[]>("/picnic/shopping-list");
+
+export const addShoppingListItem = (data: {
+  inventory_barcode?: string;
+  picnic_id?: string;
+  name: string;
+  quantity: number;
+}) =>
+  request<PicnicShoppingListItem>("/picnic/shopping-list", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+export const updateShoppingListItem = (id: number, data: { quantity?: number; picnic_id?: string }) =>
+  request<PicnicShoppingListItem>(`/picnic/shopping-list/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+
+export const deleteShoppingListItem = (id: number) =>
+  request<{ message: string }>(`/picnic/shopping-list/${id}`, { method: "DELETE" });
+
+export const syncShoppingListToCart = () =>
+  request<CartSyncResponse>("/picnic/shopping-list/sync", { method: "POST" });
