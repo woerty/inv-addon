@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -24,6 +24,10 @@ import { useInventory } from "../hooks/useInventory";
 import { useNotification } from "../components/NotificationProvider";
 import { exportData, importData, relookupBarcode, relookupAllUnknown, addShoppingListItem } from "../api/client";
 import { usePicnicStatus } from "../hooks/usePicnic";
+import { useTrackedProducts } from "../hooks/useTrackedProducts";
+import InventoryRestockButton from "../components/tracked/InventoryRestockButton";
+import TrackedProductForm from "../components/tracked/TrackedProductForm";
+import type { TrackedProduct } from "../types";
 
 type SortKey = "name" | "quantity" | "category" | "barcode" | "added_date";
 type Order = "asc" | "desc";
@@ -34,6 +38,27 @@ const InventoryPage = () => {
   const { notify } = useNotification();
   const { status: picnicStatus } = usePicnicStatus();
   const navigate = useNavigate();
+
+  const trackedProducts = useTrackedProducts();
+  const trackedByBarcode = useMemo(() => {
+    const map = new Map<string, TrackedProduct>();
+    for (const tp of trackedProducts.items) {
+      map.set(tp.barcode, tp);
+    }
+    return map;
+  }, [trackedProducts.items]);
+
+  const [trackedFormOpen, setTrackedFormOpen] = useState(false);
+  const [trackedFormBarcode, setTrackedFormBarcode] = useState("");
+  const [trackedFormExisting, setTrackedFormExisting] = useState<
+    TrackedProduct | undefined
+  >(undefined);
+
+  const openTrackedForm = (barcode: string, existing?: TrackedProduct) => {
+    setTrackedFormBarcode(barcode);
+    setTrackedFormExisting(existing);
+    setTrackedFormOpen(true);
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -237,11 +262,19 @@ const InventoryPage = () => {
               <TableCell>Lagerort</TableCell>
               <TableCell>Ablaufdatum</TableCell>
               <TableCell>Aktionen</TableCell>
+              <TableCell>Nachbest.</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {items.map((item) => (
-              <TableRow key={item.id}>
+              <TableRow
+                key={item.id}
+                sx={{
+                  ...(item.quantity === 0 && {
+                    backgroundColor: "action.hover",
+                  }),
+                }}
+              >
                 <TableCell>
                   {item.name}
                   {item.name === "Unbekanntes Produkt" && (
@@ -259,6 +292,16 @@ const InventoryPage = () => {
                     value={editFields[item.id]?.quantity ?? item.quantity}
                     onChange={(e) => handleFieldChange(item.id, "quantity", e.target.value)}
                   />
+                  {item.quantity === 0 && trackedByBarcode.has(item.barcode) && (
+                    <Typography
+                      variant="caption"
+                      color="error"
+                      display="block"
+                      sx={{ mt: 0.5 }}
+                    >
+                      leer, nachbestellt
+                    </Typography>
+                  )}
                 </TableCell>
                 <TableCell>{item.category}</TableCell>
                 <TableCell>{new Date(item.added_date).toLocaleDateString("de-DE")}</TableCell>
@@ -329,6 +372,17 @@ const InventoryPage = () => {
                     Löschen
                   </Button>
                 </TableCell>
+                <TableCell>
+                  <InventoryRestockButton
+                    tracked={trackedByBarcode.get(item.barcode)}
+                    onClick={() =>
+                      openTrackedForm(
+                        item.barcode,
+                        trackedByBarcode.get(item.barcode)
+                      )
+                    }
+                  />
+                </TableCell>
               </TableRow>
             ))}
             {!loading && items.length === 0 && (
@@ -341,6 +395,21 @@ const InventoryPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      <TrackedProductForm
+        open={trackedFormOpen}
+        mode={trackedFormExisting ? "edit" : "create"}
+        initialBarcode={trackedFormBarcode}
+        existing={trackedFormExisting}
+        onClose={() => setTrackedFormOpen(false)}
+        onSubmitCreate={async (data) => {
+          await trackedProducts.create(data);
+          notify("Nachbestellungs-Regel angelegt", "success");
+        }}
+        onSubmitUpdate={async (barcode, data) => {
+          await trackedProducts.update(barcode, data);
+          notify("Nachbestellungs-Regel aktualisiert", "success");
+        }}
+      />
     </Paper>
   );
 };
