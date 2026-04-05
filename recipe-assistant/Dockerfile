@@ -7,7 +7,11 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Production
-FROM python:3.12-slim
+# Python 3.13 is required by python-picnic-api2 >=1.3.3, which is the first
+# version that exports Picnic2FARequired / Picnic2FAError. Earlier versions
+# have no 2FA handling at all — the library just POSTs credentials and fails
+# silently on 2FA challenges, breaking our web login flow.
+FROM python:3.13-slim
 
 # Install PostgreSQL 16 + Supervisor
 RUN apt-get update && \
