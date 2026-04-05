@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,7 +18,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://recipe:recipe@localhost:5432/recipe"
     anthropic_api_key: str = ""
     openai_api_key: str = ""
-    picnic_email: str = ""
+    picnic_email: str = Field(default="", validation_alias=AliasChoices("PICNIC_MAIL", "PICNIC_EMAIL"))
     picnic_password: str = ""
     picnic_country_code: str = "DE"
     environment: str = "development"
@@ -32,7 +33,7 @@ class Settings(BaseSettings):
                 database_url="postgresql+asyncpg://recipe:recipe@localhost:5432/recipe",
                 anthropic_api_key=options.get("anthropic_api_key", ""),
                 openai_api_key=options.get("openai_api_key", ""),
-                picnic_email=options.get("picnic_email", ""),
+                picnic_email=options.get("picnic_email", "") or options.get("picnic_mail", ""),
                 picnic_password=options.get("picnic_password", ""),
                 picnic_country_code=options.get("picnic_country_code", "DE"),
                 environment="production",
