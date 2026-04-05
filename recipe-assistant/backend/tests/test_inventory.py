@@ -230,3 +230,151 @@ async def test_scan_out_ignores_token_when_unconfigured(client: AsyncClient):
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+# ---- /scan-in endpoint (scanner API contract) ----
+#
+# See docs/superpowers/specs/2026-04-05-scanner-api-design.md. Parallels
+# /scan-out: flat JSON, same auth model, optional storage_location_id that
+# references storage_locations.id (not name — scanner clients pick from a
+# cached list, auto-create on typo would be wrong).
+
+
+async def _create_location(client: AsyncClient, name: str) -> int:
+    """Create a storage location via the public API and return its id."""
+    response = await client.post("/api/storage-locations/", json={"location_name": name})
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_scan_in_creates_new_item_without_location(client: AsyncClient):
+    """Unknown barcode, no storage_location_id → 200, created:true, location null."""
+    response = await client.post(
+        "/api/inventory/scan-in", json={"barcode": "7000000000001"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["barcode"] == "7000000000001"
+    assert body["name"] == "Testprodukt"  # from conftest mock
+    assert body["quantity"] == 1
+    assert body["storage_location"] is None
+    assert body["created"] is True
+
+
+@pytest.mark.asyncio
+async def test_scan_in_creates_new_item_with_location(client: AsyncClient):
+    """Unknown barcode + valid id → 200, created:true, storage_location populated."""
+    loc_id = await _create_location(client, "Kühlschrank")
+
+    response = await client.post(
+        "/api/inventory/scan-in",
+        json={"barcode": "7000000000002", "storage_location_id": loc_id},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["created"] is True
+    assert body["storage_location"] == {"id": loc_id, "name": "Kühlschrank"}
+
+
+@pytest.mark.asyncio
+async def test_scan_in_increments_existing_quantity(client: AsyncClient):
+    """Existing barcode → 200, created:false, quantity +1."""
+    await client.post("/api/inventory/scan-in", json={"barcode": "7000000000003"})
+    await client.post("/api/inventory/scan-in", json={"barcode": "7000000000003"})
+
+    response = await client.post(
+        "/api/inventory/scan-in", json={"barcode": "7000000000003"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["created"] is False
+    assert body["quantity"] == 3
+
+
+@pytest.mark.asyncio
+async def test_scan_in_preserves_existing_location(client: AsyncClient):
+    """Existing item has location A; scan-in with location B must not overwrite."""
+    loc_a = await _create_location(client, "Speisekammer")
+    loc_b = await _create_location(client, "Tiefkühler")
+
+    # First scan sets location A
+    await client.post(
+        "/api/inventory/scan-in",
+        json={"barcode": "7000000000004", "storage_location_id": loc_a},
+    )
+
+    # Second scan tries to move to B — should be refused silently,
+    # response should echo the item's ACTUAL (still A) location.
+    response = await client.post(
+        "/api/inventory/scan-in",
+        json={"barcode": "7000000000004", "storage_location_id": loc_b},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] is False
+    assert body["quantity"] == 2
+    assert body["storage_location"] == {"id": loc_a, "name": "Speisekammer"}
+
+    # Double-check DB state via the inventory list
+    inv = await client.get("/api/inventory/")
+    matching = [i for i in inv.json() if i["barcode"] == "7000000000004"]
+    assert len(matching) == 1
+    assert matching[0]["storage_location"]["id"] == loc_a
+
+
+@pytest.mark.asyncio
+async def test_scan_in_rejects_unknown_storage_location_id(client: AsyncClient):
+    """Non-null storage_location_id that doesn't exist → 400, no state change."""
+    response = await client.post(
+        "/api/inventory/scan-in",
+        json={"barcode": "7000000000005", "storage_location_id": 9999},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["status"] == "invalid_storage_location"
+    assert body["storage_location_id"] == 9999
+    assert "error" in body
+    assert "detail" not in body
+
+    # Ensure no item was created despite the failure
+    inv = await client.get("/api/inventory/")
+    assert not [i for i in inv.json() if i["barcode"] == "7000000000005"]
+
+
+@pytest.mark.asyncio
+async def test_scan_in_requires_token_when_configured(client: AsyncClient):
+    _override_settings_with_token("supersecret")
+    try:
+        response = await client.post(
+            "/api/inventory/scan-in", json={"barcode": "7000000000006"}
+        )
+        assert response.status_code == 401
+        body = response.json()
+        assert body["status"] == "unauthorized"
+        assert "detail" not in body
+    finally:
+        _clear_settings_override()
+
+
+@pytest.mark.asyncio
+async def test_scan_in_accepts_correct_token(client: AsyncClient):
+    _override_settings_with_token("supersecret")
+    try:
+        response = await client.post(
+            "/api/inventory/scan-in",
+            json={"barcode": "7000000000007"},
+            headers={"X-Scanner-Token": "supersecret"},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+    finally:
+        _clear_settings_override()

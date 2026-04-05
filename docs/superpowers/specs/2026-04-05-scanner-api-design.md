@@ -4,7 +4,7 @@
 
 **Purpose:** Define the HTTP contract between a remote barcode-scanner client (initially a Raspberry Pi) and the Recipe Assistant backend, so the scanner and backend tracks can progress in parallel without ambiguity.
 
-**Scope:** Scan-**out** only. No scan-in, no multi-quantity, no inventory browse.
+**Scope:** Scan-**out** and scan-**in**. No multi-quantity per request, no inventory browse, no expiration-date capture at scan time.
 
 ---
 
@@ -217,11 +217,144 @@ Added to the existing backend pytest suite:
 
 ---
 
+## `POST /api/inventory/scan-in`
+
+Adds an item to inventory by barcode, optionally assigning a storage location. Parallels `/scan-out` in style: flat structured JSON, same auth model, same port.
+
+A dedicated endpoint (not an extension of the web UI's `/inventory/barcode`) because:
+
+1. `/inventory/barcode` returns `{"message": "<free German text>"}` — not parseable by the scanner client.
+2. `/inventory/barcode` takes `storage_location` as a **name** and auto-creates unknown ones via `_resolve_storage_location`. For a scanner picking from a known list, silent auto-create on typo is the wrong behavior. `/scan-in` takes an **id** and returns 400 on an unknown id.
+3. A dedicated endpoint lets us evolve the scanner contract independently from the web UI.
+
+### Request
+
+**Headers:** same as `/scan-out` (`Content-Type: application/json`, optional `X-Scanner-Token`).
+
+**Body:**
+
+```json
+{
+  "barcode": "4000417025005",
+  "storage_location_id": 2
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `barcode` | string | yes | EAN / UPC / arbitrary code |
+| `storage_location_id` | integer | no | References `storage_locations.id`. Omit or `null` for no location. |
+
+### Responses
+
+#### 200 OK — new item created
+
+```json
+{
+  "status": "ok",
+  "barcode": "4000417025005",
+  "name": "Spaghetti Barilla 500g",
+  "quantity": 1,
+  "storage_location": {"id": 2, "name": "Kühlschrank"},
+  "created": true
+}
+```
+
+When the barcode was not in inventory before the request. The backend calls the existing product-lookup pipeline to fetch a display name; unknown barcodes are stored as `"Unbekanntes Produkt"` / category `"Unbekannt"` and still return 200 with `status: "ok"` — the client shows the placeholder and the user can clean it up in the web UI.
+
+#### 200 OK — existing item, quantity incremented
+
+```json
+{
+  "status": "ok",
+  "barcode": "4000417025005",
+  "name": "Spaghetti Barilla 500g",
+  "quantity": 4,
+  "storage_location": {"id": 1, "name": "Speisekammer"},
+  "created": false
+}
+```
+
+When the barcode already existed. Behavior:
+
+- `quantity` is incremented by 1.
+- The item's `storage_location` is **never modified** by scan-in, even if the request passed a different `storage_location_id`. This prevents surprise location migration from a stale scanner-side selection. The response echoes the item's **current** storage location, which may differ from what the request sent.
+- The product name / category are not re-fetched.
+
+Users who genuinely want to move an item change it via the web UI.
+
+#### 200 OK — `storage_location: null`
+
+Present when the item has no location set (either omitted at creation or the inventory row's `storage_location_id` is NULL).
+
+```json
+{
+  "status": "ok",
+  ...
+  "storage_location": null,
+  ...
+}
+```
+
+#### 400 Bad Request — unknown storage_location_id
+
+```json
+{
+  "status": "invalid_storage_location",
+  "storage_location_id": 99,
+  "error": "Lagerort mit ID 99 existiert nicht"
+}
+```
+
+Returned only when the request includes a non-null `storage_location_id` that does not match any row in `storage_locations`. The state is not mutated.
+
+#### 404 Not Found
+
+Does **not** occur for scan-in. Unknown barcodes are created, not rejected.
+
+#### 401 Unauthorized
+
+Same shape and semantics as `/scan-out`.
+
+### Response schema (all fields)
+
+| Field | Type | When present |
+|---|---|---|
+| `status` | `"ok"` \| `"invalid_storage_location"` \| `"unauthorized"` | always |
+| `barcode` | string | `ok` |
+| `name` | string | `ok` |
+| `quantity` | integer (≥1) | `ok` |
+| `storage_location` | `{id, name}` object or `null` | `ok` |
+| `created` | boolean | `ok` |
+| `storage_location_id` | integer | `invalid_storage_location` |
+| `error` | string | `invalid_storage_location`, `unauthorized` |
+
+### Idempotency
+
+`/scan-in` is **not** idempotent. Retrying after a 200 response would increment twice. Clients retry only on network errors and 5xx (same rule as `/scan-out`).
+
+### Log action
+
+`"scan-in"` — distinct from the `"add"` action written by the web UI's `/inventory/barcode` handler.
+
+### Tests (backend)
+
+1. `test_scan_in_creates_new_item_without_location` — unknown barcode, no `storage_location_id` → 200, `created: true`, `storage_location: null`, quantity 1.
+2. `test_scan_in_creates_new_item_with_location` — unknown barcode + valid id → 200, `created: true`, `storage_location: {id, name}`.
+3. `test_scan_in_increments_existing_quantity` — barcode exists → 200, `created: false`, quantity+1.
+4. `test_scan_in_preserves_existing_location` — existing item has location A, request sends location B → response and DB both still show A.
+5. `test_scan_in_rejects_unknown_storage_location_id` → 400 with `status: "invalid_storage_location"`, no state change.
+6. `test_scan_in_requires_token_when_configured` → 401.
+7. `test_scan_in_accepts_correct_token` → 200.
+
+---
+
 ## Out of scope
 
-- Scan-**in** (adding items). Existing `/inventory/barcode` handles that path for the web UI.
 - Multi-quantity per request.
 - Any kind of cursor/browse API for the scanner client.
 - Offline queueing on the client.
 - Long-lived HA access tokens as an alternative auth method.
 - Rate limiting. The scanner is human-driven, a few scans per minute at most.
+- Expiration-date capture at scan time — entering dates on a barcode scanner is awkward, web UI handles this post-hoc.
+- Moving items between storage locations via scan-in (explicit anti-feature; see the existing-item response section).

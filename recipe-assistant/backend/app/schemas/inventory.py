@@ -48,3 +48,8 @@ class InventoryUpdateRequest(BaseModel):
 
 class ScanOutRequest(BaseModel):
     barcode: str
+
+
+class ScanInRequest(BaseModel):
+    barcode: str
+    storage_location_id: int | None = None

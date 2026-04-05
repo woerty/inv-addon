@@ -19,6 +19,7 @@ from app.schemas.inventory import (
     BarcodeRemoveRequest,
     InventoryItemResponse,
     InventoryUpdateRequest,
+    ScanInRequest,
     ScanOutRequest,
 )
 from app.services.barcode import lookup_barcode
@@ -169,6 +170,28 @@ async def remove_item_by_barcode(
     return {"message": f"Produkt mit Barcode {req.barcode} wurde entfernt."}
 
 
+def _check_scanner_token(
+    provided: str | None, configured: str
+) -> JSONResponse | None:
+    """Return a 401 JSONResponse if the token check fails, else None.
+
+    Matches the scanner API contract's optional shared-secret auth:
+    - Empty `configured` → auth is disabled, always passes.
+    - Non-empty `configured` → header must match, constant-time comparison.
+    """
+    if not configured:
+        return None
+    if not provided or not hmac.compare_digest(provided, configured):
+        return JSONResponse(
+            status_code=401,
+            content={
+                "status": "unauthorized",
+                "error": "Invalid or missing X-Scanner-Token",
+            },
+        )
+    return None
+
+
 @router.post("/scan-out")
 async def scan_out(
     req: ScanOutRequest,
@@ -182,20 +205,9 @@ async def scan_out(
     All response bodies are flat JSON (no FastAPI {"detail": ...} wrapper)
     so remote terminal clients can branch on the `status` field directly.
     """
-    # Optional shared-secret auth. Only enforced when configured; when
-    # scanner_token is empty the endpoint matches the rest of the inventory
-    # API's LAN-trust posture.
-    if settings.scanner_token:
-        if not x_scanner_token or not hmac.compare_digest(
-            x_scanner_token, settings.scanner_token
-        ):
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "status": "unauthorized",
-                    "error": "Invalid or missing X-Scanner-Token",
-                },
-            )
+    auth_fail = _check_scanner_token(x_scanner_token, settings.scanner_token)
+    if auth_fail is not None:
+        return auth_fail
 
     result = await db.execute(
         select(InventoryItem).where(InventoryItem.barcode == req.barcode)
@@ -235,6 +247,105 @@ async def scan_out(
         "name": name,
         "remaining_quantity": 0,
         "deleted": True,
+    }
+
+
+@router.post("/scan-in")
+async def scan_in(
+    req: ScanInRequest,
+    x_scanner_token: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add-by-barcode for scanner clients with structured response.
+
+    Contract: docs/superpowers/specs/2026-04-05-scanner-api-design.md.
+    Parallels /scan-out: flat JSON, same auth model. Takes a
+    storage_location_id (int, references storage_locations.id) rather
+    than a name — scanner clients pick from a cached list, so a typo
+    should 400 instead of silently creating a new location.
+    """
+    auth_fail = _check_scanner_token(x_scanner_token, settings.scanner_token)
+    if auth_fail is not None:
+        return auth_fail
+
+    # Validate storage_location_id up front so we never mutate state on
+    # an invalid request. Unknown id → 400, no side effects.
+    requested_location: StorageLocation | None = None
+    if req.storage_location_id is not None:
+        result = await db.execute(
+            select(StorageLocation).where(StorageLocation.id == req.storage_location_id)
+        )
+        requested_location = result.scalar_one_or_none()
+        if requested_location is None:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "invalid_storage_location",
+                    "storage_location_id": req.storage_location_id,
+                    "error": f"Lagerort mit ID {req.storage_location_id} existiert nicht",
+                },
+            )
+
+    # Look up existing inventory row (with storage_location eager-loaded
+    # so we can echo it in the response without a lazy load).
+    result = await db.execute(
+        select(InventoryItem)
+        .options(selectinload(InventoryItem.storage_location))
+        .where(InventoryItem.barcode == req.barcode)
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        # Increment quantity. Existing storage_location is NEVER modified
+        # by scan-in — prevents surprise migration from stale scanner-side
+        # selection. Response echoes the item's CURRENT location, which
+        # may differ from the requested one.
+        existing.quantity += 1
+        new_qty = existing.quantity
+        item_name = existing.name
+        loc_data: dict | None = None
+        if existing.storage_location is not None:
+            loc_data = {
+                "id": existing.storage_location.id,
+                "name": existing.storage_location.name,
+            }
+        await _log_action(db, req.barcode, "scan-in", f"qty → {new_qty}")
+        await db.commit()
+        return {
+            "status": "ok",
+            "barcode": req.barcode,
+            "name": item_name,
+            "quantity": new_qty,
+            "storage_location": loc_data,
+            "created": False,
+        }
+
+    # New item — resolve product details via the normal lookup pipeline.
+    # Unknown barcodes become "Unbekanntes Produkt" and still return 200;
+    # the user can clean them up later via the web UI.
+    product = await lookup_barcode(req.barcode)
+    item = InventoryItem(
+        barcode=req.barcode,
+        name=product["name"],
+        quantity=1,
+        category=product["category"],
+        storage_location_id=requested_location.id if requested_location else None,
+    )
+    db.add(item)
+    await _log_action(db, req.barcode, "scan-in", "new item")
+    await db.commit()
+
+    loc_response: dict | None = None
+    if requested_location is not None:
+        loc_response = {"id": requested_location.id, "name": requested_location.name}
+    return {
+        "status": "ok",
+        "barcode": req.barcode,
+        "name": product["name"],
+        "quantity": 1,
+        "storage_location": loc_response,
+        "created": True,
     }
 
 
