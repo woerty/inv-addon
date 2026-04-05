@@ -1,7 +1,7 @@
 # Picnic Integration — Design
 
-**Date:** 2026-04-05
-**Status:** Draft
+**Date:** 2026-04-05 (revised after empirical API probe)
+**Status:** Draft — v2
 **Scope:** Addon backend (FastAPI) + React frontend
 
 ## Goal
@@ -11,7 +11,15 @@ Integrate the Picnic grocery delivery service (DE) into the Recipe Assistant add
 1. **Re-order (cart-sync):** user builds an in-app shopping list from inventory and pushes it into the real Picnic cart with one button press. User still finalizes the order in the Picnic app (delivery slot, payment).
 2. **Auto-import from deliveries:** on demand (manual button), fetch recently delivered Picnic orders and walk through a review flow that assigns each line item to an existing inventory entry or creates a new one, with storage location, expiration date, and optional barcode scan.
 
-The hard problem is that **Picnic exposes no EANs/GTINs** in its API. Products are identified by proprietary IDs (e.g. `s1234567`). A bridge between EANs (our inventory world) and Picnic IDs must be built up gradually via user-confirmed matches and opportunistic barcode scans during the put-away workflow.
+## Key Finding: EAN → Picnic lookup is deterministic (v2 update)
+
+Initial design assumed Picnic exposed no EAN data and the integration would need a gradually-built fuzzy-match bridge table. An empirical probe against this user's 173-item inventory revealed:
+
+- **Forward lookup works.** `PicnicAPI.get_article_by_gtin(ean)` returns `{name, picnic_id}` directly. Against the real inventory, **73.4% (127/173)** of EANs resolved to a Picnic product on the first try, with 100% correctness (verified by manual name-overlap check). The 46 misses are legitimately unavailable at Picnic (house brands from dm/Rossmann, niche items) — fuzzy matching could not recover them because no Picnic equivalent exists.
+- **Reverse lookup does not work.** Delivery line items from `get_delivery()` contain `picnic_id`, `name`, `unit_quantity`, `image_ids`, `decorators[].quantity` — but **no `gtin` or `ean` field**. `get_article(picnic_id)` also returns only `{name, id}`. There is no API path from a Picnic ID to its EAN.
+- **2FA is required** for this account (Picnic DE). Library supports the flow via `generate_2fa_code` / `verify_2fa_code`; auth token must be persisted across addon restarts in `/data/picnic_token.json`.
+
+**Consequence for the design:** the "bridge table built from fuzzy matches + user confirmations" is no longer the main mechanism. For Use-Case A (cart sync), we hit `get_article_by_gtin` directly and cache the result. For Use-Case C (import), we still need fallback fuzzy matching because deliveries lack GTINs, but the cache built up by cart-sync provides a primary fast path (reverse lookup from cached `picnic_id → ean` pairs). The `EanPicnicMap` bridge table collapses into a nullable `ean` column on `picnic_products`.
 
 ## Non-Goals
 
@@ -25,9 +33,9 @@ The hard problem is that **Picnic exposes no EANs/GTINs** in its API. Products a
 
 ### UC1: Re-order via shopping list
 1. User opens the Inventory page and taps a "+ add to shopping list" icon on an item that is running low.
-2. Item appears on the new Shopping List page with its Picnic mapping status (green: mapped, yellow: needs resolution, red: no Picnic product).
-3. For yellow items, user clicks "Search Picnic…" and picks a matching product; the choice is cached in `ean_picnic_map`.
-4. When the list is ready, user clicks "Push to Picnic cart". The backend iterates mapped items and calls Picnic's cart API per item (the Picnic API has no batch endpoint); the backend endpoint returns a single aggregated response with per-item success/failure.
+2. Item appears on the new Shopping List page. Backend resolves Picnic availability on page load: cache hit in `picnic_products` first; if miss, live `get_article_by_gtin(ean)` call; cache the result.
+3. Item is shown as either **green (mapped)** with the matched Picnic product name, or **red (unavailable)** meaning Picnic doesn't sell this EAN. Red items stay on the list but are excluded from cart sync. A small optional "manuell suchen" link opens a free-text Picnic search dialog as a last-resort fallback (rarely needed — misses are usually products Picnic doesn't stock at all).
+4. When the list is ready, user clicks "Push to Picnic cart". The backend iterates mapped items and calls Picnic's cart API per item (no batch endpoint); returns an aggregated per-item success/failure response.
 5. User opens Picnic app, picks a delivery slot, completes order outside of this addon.
 
 ### UC2: Import delivered Picnic order
@@ -56,7 +64,7 @@ backend/app/
 │       ├── import_flow.py      # orchestration: fetch → diff → review → commit
 │       └── cart.py             # re-order: push shopping list into Picnic cart (per-item)
 ├── models/
-│   └── picnic.py               # PicnicProduct, EanPicnicMap,
+│   └── picnic.py               # PicnicProduct (with embedded ean),
 │                               # PicnicDeliveryImport, ShoppingListItem
 ├── routers/
 │   └── picnic.py               # /api/picnic/*
@@ -86,55 +94,49 @@ frontend/src/
 
 Config flows through Home Assistant addon `config.json` → environment variables:
 
-- `PICNIC_EMAIL` (required to enable Picnic features)
+- `PICNIC_MAIL` (required to enable Picnic features; the Settings class also accepts `PICNIC_EMAIL` as an alias)
 - `PICNIC_PASSWORD`
 - `PICNIC_COUNTRY_CODE` (default: `DE`)
 
-The client authenticates lazily on first use, caches the resulting `x-picnic-auth` token in `/data/picnic_token.json`, and re-logins transparently on 401. Feature is considered "enabled" iff `PICNIC_EMAIL` and `PICNIC_PASSWORD` are both present; otherwise `/api/picnic/status` reports disabled and the frontend hides Picnic UI elements.
+**Authentication state** is persisted at `/data/picnic_token.json`, which stores the `x-picnic-auth` bearer token returned by Picnic after a successful login. On addon startup the client reads the cached token and reuses it, avoiding repeated logins. On a 401 response the client re-attempts login once with the stored credentials.
+
+**2FA bootstrap:** The Picnic DE account tested requires SMS-based 2FA on new logins. Because HA addons run headless, the initial 2FA flow cannot be done through the normal HTTP API path — it needs an out-of-band trigger. The addon ships a small CLI helper (`python -m app.services.picnic.setup`) that the user runs once (inside the addon container or locally pointing at `/data/picnic_token.json`): it prompts for an OTP channel, sends the SMS, polls `/data/picnic_otp.txt` for the user-supplied code, verifies, and writes the resulting token to `/data/picnic_token.json`. After that, normal operation uses the cached token without ever touching the login endpoint. If the stored token expires and re-login demands 2FA again, `/api/picnic/status` returns HTTP 503 with `{"error": "picnic_reauth_required"}`, and the frontend shows a banner instructing the user to rerun the setup CLI.
+
+Feature is considered "enabled" iff `PICNIC_MAIL` (or `PICNIC_EMAIL`) and `PICNIC_PASSWORD` are both present *and* a valid auth token is available in `/data/picnic_token.json`. Otherwise `/api/picnic/status` reports disabled and the frontend hides Picnic UI elements.
 
 ### Dependencies
 
 - Backend new: `python-picnic-api2`, `rapidfuzz`
 - Frontend new: none
 
-## Data Model
+## Data Model (v2 — simplified)
 
-All new tables live in a single Alembic migration (`add_picnic_tables`). No existing tables are modified.
+All new tables live in a single Alembic migration (`add_picnic_tables`). No existing tables are modified. The v1 `EanPicnicMap` bridge table is gone; its role is absorbed into a nullable `ean` column on `picnic_products`.
 
 ```python
 class PicnicProduct(Base):
-    """Cache of Picnic catalog entries, refreshed opportunistically."""
+    """Cache of Picnic catalog entries + learned EAN pairing.
+
+    - picnic_id is the primary key (stable Picnic SKU identifier).
+    - ean is nullable, indexed. Populated whenever we successfully resolve a
+      Picnic product via get_article_by_gtin(ean), or whenever a user manually
+      links a delivery line item to an EAN via scan or confirmation during
+      import review.
+    - A single EAN may map to multiple Picnic SKUs (different pack sizes) -
+      ean is NOT unique. When resolving EAN -> picnic_id for cart sync, pick
+      the most recently seen match (ORDER BY last_seen DESC).
+    """
     __tablename__ = "picnic_products"
 
     picnic_id: Mapped[str] = mapped_column(String, primary_key=True)
+    ean: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    brand: Mapped[str | None] = mapped_column(String, nullable=True)
     unit_quantity: Mapped[str | None] = mapped_column(String, nullable=True)
     image_id: Mapped[str | None] = mapped_column(String, nullable=True)
     last_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_seen: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
-
-
-class EanPicnicMap(Base):
-    """Bridge between EANs (inventory) and Picnic product IDs.
-    
-    Built up gradually via scans and user confirmations.
-    N:M relationship: one EAN may map to multiple Picnic SKUs (e.g. different pack
-    sizes) and one Picnic SKU may map to multiple EANs. Uniqueness is on the pair.
-    """
-    __tablename__ = "ean_picnic_map"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ean: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    picnic_id: Mapped[str] = mapped_column(
-        String, ForeignKey("picnic_products.picnic_id", ondelete="CASCADE"), nullable=False
-    )
-    source: Mapped[str] = mapped_column(String, nullable=False)  # "scan" | "user_confirmed" | "auto"
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    __table_args__ = (UniqueConstraint("ean", "picnic_id", name="uq_ean_picnic"),)
 
 
 class PicnicDeliveryImport(Base):
@@ -158,6 +160,8 @@ class ShoppingListItem(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 ```
 
+The v1 `brand` column is dropped — `get_article_by_gtin` returns the brand embedded in the product name (e.g. `"Bamboo Garden Kokosmilch"`); splitting it would require parsing heuristics we don't need.
+
 ### Handling Picnic-only items (no real EAN)
 
 Fresh produce, bakery items, or items where the user skips the barcode scan during import have no real EAN. They are stored in `InventoryItem` with a **synthetic barcode** of the form `picnic:s1234567`. The existing unique constraint on `InventoryItem.barcode` remains valid because `picnic:<id>` is unique by construction.
@@ -166,7 +170,7 @@ Promotion from synthetic to real EAN happens in exactly one place: during the **
 
 1. Looks up the scanned EAN in inventory.
 2. If found → flags the synthetic inventory row for deletion at commit time and redirects the decision to `match_existing` with `target_barcode = scanned_ean`. Quantities will be merged in the commit transaction.
-3. If not found → queues a promotion UPDATE (`InventoryItem.barcode = scanned_ean`) for commit, plus an `ean_picnic_map` row with `source="scan"`.
+3. If not found → queues a promotion UPDATE (`InventoryItem.barcode = scanned_ean`) for commit, plus an update to `picnic_products.ean` for the corresponding Picnic ID so future lookups are cached.
 
 There is no separate "promote this synthetic barcode" endpoint. Promotion only happens as a side effect of scanning during import review. Synthetic-barcode items behave like regular inventory items in all other views (shown on the Inventory page, editable, deletable), and the UI displays them with a small "Picnic" badge so the user knows they lack a real EAN.
 
@@ -185,8 +189,8 @@ All endpoints live under `/api/picnic/*`.
 | `PATCH` | `/api/picnic/shopping-list/{id}` | Update quantity or mapping. |
 | `DELETE` | `/api/picnic/shopping-list/{id}` | Remove item. |
 | `POST` | `/api/picnic/shopping-list/sync` | Push mapped items into the real Picnic cart. Returns per-item status. |
-| `GET` | `/api/picnic/mappings` | List all EAN ↔ Picnic mappings (admin/debug). |
-| `DELETE` | `/api/picnic/mappings/{id}` | Delete an incorrect mapping. |
+| `GET` | `/api/picnic/cache` | List cached `picnic_products` rows (admin/debug: shows ean ↔ picnic_id pairings). |
+| `DELETE` | `/api/picnic/cache/{picnic_id}` | Clear a cached entry (e.g. to force re-lookup). |
 
 ### Write-safety guarantee
 
@@ -243,19 +247,34 @@ class CartSyncResponse(BaseModel):
     skipped_count: int
 ```
 
-## Matching Algorithm
+## Resolution Strategy (v2)
 
-Given a Picnic line item (picnic_id, name, unit_quantity), produce a ranked candidate list of existing `InventoryItem`s.
+There are two distinct resolution directions, handled asymmetrically:
 
-**Step 1 — Exact match via mapping table.**
-```
-SELECT ean FROM ean_picnic_map WHERE picnic_id = ?
-```
-If a row exists, return that single inventory item with confidence 1.0 and `reason="known mapping"`. Done.
+### Direction 1: inventory EAN → Picnic product (cart sync)
 
-**Step 2 — Fuzzy name match.** For every inventory item:
+**Used for:** Use-Case A (shopping list → cart sync), inventory-page "find at Picnic" lookups.
 
-1. Normalize both names: lowercase; strip manufacturer/brand annotations in parentheses; strip unit strings (`500 g`, `1 l`, `6 x 200ml`); collapse whitespace; remove punctuation.
+**Deterministic path, in order:**
+1. **Cache hit.** `SELECT * FROM picnic_products WHERE ean = ? ORDER BY last_seen DESC LIMIT 1`. If found, use the cached `picnic_id`. Done.
+2. **API lookup.** Call `picnic_api.get_article_by_gtin(ean)`. Returns `{"name": "...", "id": "s..."}` on hit, or raises/returns empty on miss.
+3. **Cache result.** On hit: upsert into `picnic_products` with `picnic_id`, `ean`, `name`. Subsequent lookups short-circuit at step 1.
+4. **On miss:** mark the inventory item as "unavailable at Picnic" in the response. User can manually search via `/api/picnic/search?q=...` as an optional fallback (rare — our empirical data shows most misses are products Picnic genuinely doesn't sell, not near-matches).
+
+Fuzzy matching is **not used** in this direction. Forward GTIN lookup is the source of truth.
+
+**Measured performance:** on a 173-item real-world inventory, 73.4% of items resolve to a Picnic product via this path with 100% correctness. The remaining 26.6% are legitimately unavailable (dm/Rossmann house brands, niche items).
+
+### Direction 2: Picnic delivery line item → existing inventory item (import)
+
+**Used for:** Use-Case C (import from delivered Picnic orders).
+
+Picnic deliveries expose `{picnic_id, name, unit_quantity, decorators[].quantity}` per line item — **no EAN**. So we cannot do a deterministic lookup in this direction. The algorithm is:
+
+**Step 1 — Cache hit via picnic_products.ean.** `SELECT ean FROM picnic_products WHERE picnic_id = ? AND ean IS NOT NULL`. If the Picnic ID is in our cache with a known EAN (which happens whenever cart-sync or a prior scan populated it), look up the inventory item by that EAN. If found, return it as a single suggestion with confidence 100 and `reason="known mapping"`. Done.
+
+**Step 2 — Fuzzy name match (fallback).** For every inventory item:
+1. Normalize both names: lowercase; strip manufacturer/brand annotations in parentheses; strip unit strings (`500 g`, `1 l`, `6 x 200ml`); collapse whitespace; remove punctuation; transliterate umlauts.
 2. Compute `rapidfuzz.fuzz.token_set_ratio(normalized_picnic, normalized_inv)` → 0–100.
 3. Unit-quantity bonus: if both unit strings parse to a comparable quantity (gram, ml, count) and match within 10% tolerance, add +10 to the score (capped at 100).
 4. Return the top 5 candidates with score ≥ 60.
@@ -264,23 +283,15 @@ If a row exists, return that single inventory item with confidence 1.0 and `reas
 
 | Score range | Tier | UI behavior |
 |-------------|------|-------------|
-| ≥ 92 | confident | Pre-selected, vor-gehakt, one-tap confirm |
+| = 100 (known mapping) | known | Pre-selected, shown with "gemappt" badge |
+| ≥ 92 | confident | Pre-selected, one-tap confirm |
 | 75–91 | uncertain | Expandable list, no pre-selection |
 | 60–74 | weak | Shown but dimmed |
-| < 60 | none | No suggestions; user picks manually or creates new |
+| < 60 | none | No suggestions; user picks manually, scans, or creates new |
 
-**Step 4 — Learning:**
+**Step 4 — Learning.** When a user confirms a delivery line item → existing inventory item during import review, update the corresponding `picnic_products` row with the inventory item's EAN. Future imports of the same Picnic SKU become deterministic (step 1 catches them). Scanned EANs during review take precedence over any prior fuzzy-based pairing (simple overwrite of the `ean` column).
 
-Every user decision writes into `ean_picnic_map`:
-- Confirmed match → `source="user_confirmed"`
-- Scanned barcode during review → `source="scan"` (replaces any existing `user_confirmed` entry on conflict)
-- Auto-accepted high-confidence match (≥ 92, not overridden by user) → `source="auto"`
-
-`source` is a trust hint for future conflict resolution: `scan > user_confirmed > auto`.
-
-**Step 5 — N:M relationships:**
-
-A single EAN may have multiple Picnic SKUs (e.g. 500 g and 1 kg packs of the same product), and vice versa. The unique constraint is on the `(ean, picnic_id)` pair, not on either column individually. When resolving a shopping-list EAN to a Picnic ID for cart sync, prefer the most recent mapping (`ORDER BY created_at DESC`) and let the user override via a dropdown in the shopping list UI.
+**N:M handling:** in practice, one EAN → many Picnic SKUs (different pack sizes of the same product) is the common case. We don't enforce uniqueness on `picnic_products.ean`; during cart-sync resolution we pick the most recently seen entry. One Picnic SKU → many EANs is extremely rare and treated as "last write wins".
 
 ## UI Flows
 
@@ -300,25 +311,26 @@ A single EAN may have multiple Picnic SKUs (e.g. 500 g and 1 kg packs of the sam
 ### Flow 2: Shopping list → Picnic cart
 
 1. New sidebar navigation entry "Einkaufsliste".
-2. Shopping list page lists all `ShoppingListItem`s with their Picnic resolution status:
-   - Green: `picnic_id` resolved (via mapping or manual pick)
-   - Yellow: no mapping, "Picnic-Produkt suchen…" button opens a search dialog
-   - Red: search returned nothing and user has not picked; cannot be synced
+2. Shopping list page lists all `ShoppingListItem`s with their Picnic resolution status (determined by calling `get_article_by_gtin` or cache lookup on demand when the page loads, or lazily when the user toggles an item):
+   - **Green** — Picnic product resolved (either from cache or a just-completed live GTIN lookup). Picnic name + unit quantity displayed under the row.
+   - **Red "nicht bei Picnic verfügbar"** — forward lookup returned no hit. Item stays on the list but is excluded from cart sync. A small "manuell suchen" link opens the free-text search dialog as an optional fallback.
 3. Inventory page items gain a quick-action "+ shopping list" icon.
-4. Shopping list page also has an "Add item" button with two tabs: "From inventory" and "Search Picnic directly".
+4. Shopping list page also has an "Add item" button with two modes: "From inventory" (resolved via EAN → GTIN lookup) and "Search Picnic directly" (bypasses the inventory, picks a Picnic SKU directly).
 5. "Push to Picnic cart" button syncs all green items. Response displays per-item success/failure inline.
 6. Successfully-synced items are **not** automatically removed from the shopping list — user removes them manually after verifying in the Picnic app (safety against double-adds).
+
+Compared to v1, this is a much simpler UX: ~73% of items are green on first sight, and the yellow "needs manual resolution" state is gone.
 
 ### Flow 3: Barcode scan during review
 
 Reuses the existing scanner component from the Inventory page. On scan result:
-- Known EAN (already in inventory) → auto-select as match target, show confidence 1.0 tag, queue a `source="scan"` mapping write for commit.
-- Unknown EAN → trigger OpenFoodFacts lookup (existing `barcode.py` chain), pre-fill name/category for the "Create new" fields of this card.
+- Known EAN (already in inventory) → auto-select as match target, show confidence 1.0 tag, queue an update to `picnic_products.ean` for commit (links the Picnic SKU in this card to the scanned EAN).
+- Unknown EAN → trigger OpenFoodFacts lookup (existing `barcode.py` chain), pre-fill name/category for the "Create new" fields of this card. On commit, the new inventory item is created and the corresponding `picnic_products.ean` is updated.
 - Scan fails / no barcode readable → overlay shows error, user can retry or close.
 
 ## Error Handling
 
-- **Auth failure (401):** Client attempts one silent re-login with config credentials. If that fails, `/api/picnic/*` returns HTTP 503 with `{"error": "picnic_auth_failed", "detail": ...}`. Frontend shows a persistent banner prompting to check addon config.
+- **Auth failure (401) on cached token:** Client clears `/data/picnic_token.json` and attempts one silent re-login with config credentials. If 2FA is triggered again (new device, expired session, etc.), `/api/picnic/*` returns HTTP 503 with `{"error": "picnic_reauth_required"}`. Frontend shows a persistent banner prompting the user to rerun the setup CLI. If the re-login succeeds without 2FA, the request is retried transparently.
 - **Rate limit (429):** Exponential backoff (1s, 2s, 4s), max 3 retries per request, then give up with HTTP 503.
 - **Timeout (> 10s):** Abort request, return HTTP 504. Import flow is idempotent via `picnic_delivery_imports` dedup; user can re-trigger safely.
 - **Partial import:** The commit endpoint runs all writes (inventory, mappings, delivery marker) in a single database transaction. Either everything lands or nothing does.
@@ -336,10 +348,10 @@ Reuses the existing scanner component from the Inventory page. On scan result:
 
 ### Unit tests (`tests/services/picnic/`)
 
-- **`test_matching.py`** — table-driven tests over the normalizer and scorer with realistic German product names. Covers: unit-string stripping, brand removal, token_set_ratio behavior, unit-quantity bonus, threshold classification, N:M resolution.
-- **`test_catalog.py`** — upsert logic, last_seen updating, stale-entry queries.
-- **`test_import_flow.py`** — dedup via `picnic_delivery_imports`, idempotent re-runs, partial-commit rollback on error, promotion of synthetic barcodes to real EANs.
-- **`test_cart.py`** — batch cart sync with mixed success/failure responses, resolution of unmapped items.
+- **`test_matching.py`** — table-driven tests over the normalizer and scorer with realistic German product names. Covers: unit-string stripping, brand removal, token_set_ratio behavior, unit-quantity bonus, threshold classification. Fuzzy matching is fallback-only, so the bar for coverage here is "works on realistic examples" not "covers every edge case".
+- **`test_catalog.py`** — upsert logic for `picnic_products` (with and without `ean`), last_seen updating, EAN-based lookup, picnic_id-based lookup.
+- **`test_import_flow.py`** — dedup via `picnic_delivery_imports`, idempotent re-runs, cache-first then fuzzy-fallback resolution, partial-commit rollback on error, promotion of synthetic barcodes to real EANs.
+- **`test_cart.py`** — cart sync with GTIN lookup hits and misses, handling of items with no resolvable Picnic product, per-item failure tracking.
 
 ### Integration tests (`tests/routers/test_picnic.py`)
 
@@ -361,13 +373,15 @@ No live Picnic API calls in CI (flaky, requires credentials). The spec includes 
 
 ### Manual smoke-test checklist
 
-1. Configure addon with valid Picnic DE credentials.
-2. Open `/api/picnic/status` → should report `enabled: true` with account info.
-3. Trigger import fetch → should list any delivered-but-not-imported orders.
-4. Walk through review flow, confirm all, commit → verify inventory quantities in Inventory page.
-5. Add 2–3 inventory items to shopping list; verify one resolves automatically (via just-created mapping) and one requires manual search.
-6. Push shopping list to Picnic cart → open Picnic app, verify items appear.
-7. Trigger a second import of the same delivery → should be a no-op (dedup check).
+1. Run the 2FA setup CLI once to obtain `/data/picnic_token.json`.
+2. Configure addon with valid Picnic DE credentials.
+3. Open `/api/picnic/status` → should report `enabled: true` with account info.
+4. Add 5 inventory items to the shopping list. Expect ~70% to resolve green immediately via GTIN lookup, rest shown as "nicht bei Picnic verfügbar".
+5. Push shopping list to Picnic cart → open Picnic app, verify items appear.
+6. Trigger import fetch → should list any delivered-but-not-imported orders.
+7. Walk through review flow: expect line items whose SKU was already in the cache (from step 4) to show confidence-100 "known mapping" instantly. New SKUs fall back to fuzzy matching.
+8. Commit → verify inventory quantities updated.
+9. Trigger a second import of the same delivery → should be a no-op (dedup check).
 
 ## Open Questions
 
@@ -375,4 +389,6 @@ None at design time. Any new questions discovered during implementation should b
 
 ## Rollout Plan
 
-Single PR, single merge. The feature is gated by presence of `PICNIC_EMAIL` in addon config, so users without Picnic see no behavioral change. Alembic migration is additive (new tables only) and safe to run on existing deployments.
+Single PR, single merge. The feature is gated by presence of `PICNIC_MAIL` (or `PICNIC_EMAIL` alias) + `PICNIC_PASSWORD` + a valid cached token in `/data/picnic_token.json`, so users without Picnic see no behavioral change. Alembic migration is additive (new tables only) and safe to run on existing deployments.
+
+The 2FA setup CLI is shipped as `python -m app.services.picnic.setup`, run once per installation by the user (interactively, inside the addon container or a local environment pointing at the same `/data` volume).

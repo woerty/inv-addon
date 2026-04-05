@@ -2,13 +2,23 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Integrate Picnic (DE) grocery service to enable cart-sync re-ordering from an in-app shopping list and on-demand import of delivered Picnic orders into the inventory, bridging the EAN ↔ Picnic product ID gap via a learned mapping table.
+**Goal:** Integrate Picnic (DE) grocery service to enable cart-sync re-ordering from an in-app shopping list and on-demand import of delivered Picnic orders into the inventory. The primary resolution path is deterministic `get_article_by_gtin(ean)` lookup (73% hit rate on real inventory data); fuzzy name matching is only used as a fallback for delivery import where Picnic line items lack GTIN fields.
 
-**Architecture:** New `services/picnic/` sub-package wraps `python-picnic-api2` with a thin client, a catalog cache, a fuzzy matcher, an import-flow orchestrator, and a cart-sync module. Four new DB tables (`picnic_products`, `ean_picnic_map`, `picnic_delivery_imports`, `shopping_list`) are added via an additive Alembic migration; existing `InventoryItem` schema is untouched. Frontend adds two pages (PicnicImportPage, ShoppingListPage) + hook + components. Feature is gated by presence of `PICNIC_EMAIL` in addon config.
+**Architecture:** New `services/picnic/` sub-package wraps `python-picnic-api2` with a thin client, a GTIN-cache, a fuzzy matcher (fallback), an import-flow orchestrator, a cart-sync module, and a 2FA setup CLI. Three new DB tables (`picnic_products` with embedded nullable `ean` column, `picnic_delivery_imports`, `shopping_list`) are added via an additive Alembic migration; existing `InventoryItem` schema is untouched. Frontend adds two pages (PicnicImportPage, ShoppingListPage) + hook + components. Feature is gated by presence of `PICNIC_MAIL` + `PICNIC_PASSWORD` in addon config plus a valid cached token in `/data/picnic_token.json`.
 
-**Tech Stack:** FastAPI (async), SQLAlchemy 2.0 async, Alembic, Pydantic v2, `python-picnic-api2`, `rapidfuzz`, React + TypeScript, Vite, react-router-dom.
+**Tech Stack:** FastAPI (async), SQLAlchemy 2.0 async, Alembic, Pydantic v2, `python-picnic-api2` (imported as `python_picnic_api2`, class `PicnicAPI`), `rapidfuzz`, React + TypeScript, Vite, react-router-dom.
 
-**Spec:** `docs/superpowers/specs/2026-04-05-picnic-integration-design.md`
+**Spec:** `docs/superpowers/specs/2026-04-05-picnic-integration-design.md` (v2, revised 2026-04-05 after empirical API probe)
+
+**v2 changes to this plan:**
+- Task 1 needs a fix commit: `PICNIC_MAIL` alias for `PICNIC_EMAIL` in Settings (user's `.env` uses `PICNIC_MAIL`).
+- Task 2 drops the `ean_picnic_map` table entirely. `PicnicProduct` gains a nullable, indexed `ean` column and drops the `brand` column.
+- Task 5 (catalog) takes the `ean` column into account in its data class and upsert logic.
+- Task 6 (client) adds 2FA handling: reads/writes `/data/picnic_token.json`, raises a distinct `PicnicReauthRequired` exception if the cached token fails and credentials trigger 2FA. Also adds a standalone setup CLI module `app/services/picnic/setup.py`.
+- Task 7 (import flow) uses `picnic_products.ean` as the cache lookup instead of `ean_picnic_map`. Matching service is called as a fallback, not primary.
+- Task 8 (cart sync) is substantially simpler: direct `get_article_by_gtin` lookup with cache; no "manual mapping" step, no user prompt to resolve unmapped items.
+- Task 9 (router): `/api/picnic/mappings` → `/api/picnic/cache`. `/api/picnic/search` stays but is now an optional fallback path for the "nicht bei Picnic verfügbar" case.
+- Task 13 (frontend shopping list): drops the yellow "manual resolution" state; items are either green (mapped via GTIN) or red ("nicht bei Picnic verfügbar"). Search dialog becomes an optional fallback link rather than a primary UI path.
 
 ---
 
@@ -113,6 +123,91 @@ git commit -m "feat(picnic): add dependencies and addon config schema"
 
 ---
 
+## Task 1b: Fix — accept PICNIC_MAIL env var alias
+
+**Why:** The user's existing `.env` file uses `PICNIC_MAIL` (German-style), but Task 1's Settings class only accepts `PICNIC_EMAIL`. Without this fix, the addon cannot read credentials from the existing config. Also the module name for runtime imports is `python_picnic_api2`, not `picnicapi` as earlier Task 1 verification step assumed.
+
+**Files:**
+- Modify: `recipe-assistant/backend/app/config.py`
+
+- [ ] **Step 1: Update Settings to accept both env var names**
+
+Edit `recipe-assistant/backend/app/config.py`. Replace the plain field declaration:
+
+```python
+    picnic_email: str = ""
+```
+
+with a pydantic alias that accepts both `PICNIC_MAIL` and `PICNIC_EMAIL`:
+
+```python
+    picnic_email: str = Field(default="", validation_alias=AliasChoices("PICNIC_MAIL", "PICNIC_EMAIL"))
+```
+
+Add the necessary imports at the top of the file (alongside existing pydantic imports):
+
+```python
+from pydantic import AliasChoices, Field
+```
+
+Also update `from_ha_options` to read from the same keys (the HA config.json stores the key as `picnic_email` — that stays unchanged, only env-var alias is new):
+
+```python
+    @classmethod
+    def from_ha_options(cls) -> Settings:
+        options_path = Path("/data/options.json")
+        if options_path.exists():
+            options = json.loads(options_path.read_text())
+            return cls(
+                database_url="postgresql+asyncpg://recipe:recipe@localhost:5432/recipe",
+                anthropic_api_key=options.get("anthropic_api_key", ""),
+                openai_api_key=options.get("openai_api_key", ""),
+                picnic_email=options.get("picnic_email", "") or options.get("picnic_mail", ""),
+                picnic_password=options.get("picnic_password", ""),
+                picnic_country_code=options.get("picnic_country_code", "DE"),
+                environment="production",
+            )
+        return cls()
+```
+
+- [ ] **Step 2: Verify Settings reads PICNIC_MAIL**
+
+From the `.venv` activated at `recipe-assistant/backend/.venv`:
+
+```bash
+source recipe-assistant/backend/.venv/bin/activate && \
+  PICNIC_MAIL=probe@example.com PICNIC_PASSWORD=x python -c "
+from app.config import Settings
+s = Settings()
+assert s.picnic_email == 'probe@example.com', f'got {s.picnic_email!r}'
+print('PICNIC_MAIL alias works')
+"
+```
+
+Expected: `PICNIC_MAIL alias works`.
+
+Also verify the other alias still works:
+
+```bash
+PICNIC_EMAIL=probe2@example.com PICNIC_PASSWORD=x python -c "
+from app.config import Settings
+s = Settings()
+assert s.picnic_email == 'probe2@example.com', f'got {s.picnic_email!r}'
+print('PICNIC_EMAIL alias works')
+"
+```
+
+Expected: `PICNIC_EMAIL alias works`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add recipe-assistant/backend/app/config.py
+git commit -m "fix(picnic): accept PICNIC_MAIL as env var alias"
+```
+
+---
+
 ## Task 2: Data Model — Picnic Tables
 
 **Files:**
@@ -123,51 +218,40 @@ git commit -m "feat(picnic): add dependencies and addon config schema"
 
 - [ ] **Step 1: Create `models/picnic.py`**
 
-Full file contents:
+Full file contents (v2 — no EanPicnicMap, ean merged into PicnicProduct):
 
 ```python
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
 
 class PicnicProduct(Base):
-    """Cache of Picnic catalog entries, refreshed opportunistically."""
+    """Cache of Picnic catalog entries + learned EAN pairing.
+
+    ean is nullable and indexed. It is populated whenever:
+      - get_article_by_gtin(ean) succeeds (cart sync path)
+      - user scans or confirms an EAN during import review
+    
+    ean is NOT unique: one EAN may map to multiple Picnic SKUs (pack sizes).
+    On resolution we pick the most recently seen match (ORDER BY last_seen DESC).
+    """
     __tablename__ = "picnic_products"
 
     picnic_id: Mapped[str] = mapped_column(String, primary_key=True)
+    ean: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    brand: Mapped[str | None] = mapped_column(String, nullable=True)
     unit_quantity: Mapped[str | None] = mapped_column(String, nullable=True)
     image_id: Mapped[str | None] = mapped_column(String, nullable=True)
     last_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_seen: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
-
-
-class EanPicnicMap(Base):
-    """Bridge between EANs and Picnic product IDs. N:M via (ean, picnic_id) pair."""
-    __tablename__ = "ean_picnic_map"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ean: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    picnic_id: Mapped[str] = mapped_column(
-        String,
-        ForeignKey("picnic_products.picnic_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    source: Mapped[str] = mapped_column(String, nullable=False)  # scan|user_confirmed|auto
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
-    )
-
-    __table_args__ = (UniqueConstraint("ean", "picnic_id", name="uq_ean_picnic"),)
 
 
 class PicnicDeliveryImport(Base):
@@ -205,7 +289,6 @@ from app.models.chat import ChatMessage
 from app.models.log import InventoryLog
 from app.models.person import Person
 from app.models.picnic import (
-    EanPicnicMap,
     PicnicDeliveryImport,
     PicnicProduct,
     ShoppingListItem,
@@ -218,7 +301,6 @@ __all__ = [
     "InventoryLog",
     "Person",
     "PicnicProduct",
-    "EanPicnicMap",
     "PicnicDeliveryImport",
     "ShoppingListItem",
 ]
@@ -242,7 +324,6 @@ Replace with:
             InventoryLog,
             Person,
             PicnicProduct,
-            EanPicnicMap,
             PicnicDeliveryImport,
             ShoppingListItem,
         )
@@ -276,8 +357,8 @@ def upgrade() -> None:
     op.create_table(
         "picnic_products",
         sa.Column("picnic_id", sa.String(), nullable=False),
+        sa.Column("ean", sa.String(), nullable=True),
         sa.Column("name", sa.String(), nullable=False),
-        sa.Column("brand", sa.String(), nullable=True),
         sa.Column("unit_quantity", sa.String(), nullable=True),
         sa.Column("image_id", sa.String(), nullable=True),
         sa.Column("last_price_cents", sa.Integer(), nullable=True),
@@ -289,26 +370,7 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("picnic_id"),
     )
-
-    op.create_table(
-        "ean_picnic_map",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("ean", sa.String(), nullable=False),
-        sa.Column("picnic_id", sa.String(), nullable=False),
-        sa.Column("source", sa.String(), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.DateTime(),
-            nullable=False,
-            server_default=sa.func.now(),
-        ),
-        sa.ForeignKeyConstraint(
-            ["picnic_id"], ["picnic_products.picnic_id"], ondelete="CASCADE"
-        ),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("ean", "picnic_id", name="uq_ean_picnic"),
-    )
-    op.create_index("ix_ean_picnic_map_ean", "ean_picnic_map", ["ean"])
+    op.create_index("ix_picnic_products_ean", "picnic_products", ["ean"])
 
     op.create_table(
         "picnic_delivery_imports",
@@ -343,8 +405,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("shopping_list")
     op.drop_table("picnic_delivery_imports")
-    op.drop_index("ix_ean_picnic_map_ean", table_name="ean_picnic_map")
-    op.drop_table("ean_picnic_map")
+    op.drop_index("ix_picnic_products_ean", table_name="picnic_products")
     op.drop_table("picnic_products")
 ```
 
@@ -356,7 +417,7 @@ Run from `recipe-assistant/backend`:
 rm -f dev.db && python -c "
 import asyncio
 from app.database import Base, engine
-from app.models import InventoryItem, StorageLocation, ChatMessage, InventoryLog, Person, PicnicProduct, EanPicnicMap, PicnicDeliveryImport, ShoppingListItem
+from app.models import InventoryItem, StorageLocation, ChatMessage, InventoryLog, Person, PicnicProduct, PicnicDeliveryImport, ShoppingListItem
 
 async def main():
     async with engine.begin() as conn:
@@ -459,9 +520,10 @@ class ShoppingListItemResponse(BaseModel):
     id: int
     inventory_barcode: str | None
     picnic_id: str | None
+    picnic_name: str | None  # resolved via GTIN lookup or cache
     name: str
     quantity: int
-    picnic_status: Literal["mapped", "unmapped", "missing"]
+    picnic_status: Literal["mapped", "unavailable"]  # v2: no yellow state
     added_at: datetime
 
     model_config = {"from_attributes": True}
@@ -493,12 +555,11 @@ class CartSyncResponse(BaseModel):
     skipped_count: int
 
 
-# --- Search ---
+# --- Search (fallback for unavailable items) ---
 
 class PicnicSearchResult(BaseModel):
     picnic_id: str
     name: str
-    brand: str | None = None
     unit_quantity: str | None = None
     image_id: str | None = None
     price_cents: int | None = None
@@ -508,14 +569,16 @@ class PicnicSearchResponse(BaseModel):
     results: list[PicnicSearchResult]
 
 
-# --- Mappings (admin) ---
+# --- Cache (admin / debug) ---
 
-class EanPicnicMapResponse(BaseModel):
-    id: int
-    ean: str
+class PicnicProductCacheEntry(BaseModel):
     picnic_id: str
-    source: str
-    created_at: datetime
+    ean: str | None
+    name: str
+    unit_quantity: str | None
+    image_id: str | None
+    last_price_cents: int | None
+    last_seen: datetime
 
     model_config = {"from_attributes": True}
 ```
@@ -891,8 +954,8 @@ async def session():
 async def test_upsert_product_creates(session: AsyncSession):
     data = PicnicProductData(
         picnic_id="s1",
-        name="Vollmilch 1L",
-        brand="Ja!",
+        ean="4014400900057",
+        name="Ja! Vollmilch 1 L",
         unit_quantity="1 L",
         image_id="img-1",
         last_price_cents=99,
@@ -902,18 +965,21 @@ async def test_upsert_product_creates(session: AsyncSession):
 
     row = await get_product(session, "s1")
     assert row is not None
-    assert row.name == "Vollmilch 1L"
+    assert row.name == "Ja! Vollmilch 1 L"
+    assert row.ean == "4014400900057"
     assert row.last_price_cents == 99
 
 
 @pytest.mark.asyncio
-async def test_upsert_product_updates_existing(session: AsyncSession):
-    data1 = PicnicProductData(picnic_id="s1", name="Old Name", brand=None,
+async def test_upsert_product_updates_existing_preserves_ean(session: AsyncSession):
+    """Updating a row without passing ean must not clobber a previously learned ean."""
+    data1 = PicnicProductData(picnic_id="s1", ean="4014400900057", name="Old Name",
                               unit_quantity=None, image_id=None, last_price_cents=100)
     await upsert_product(session, data1)
     await session.commit()
 
-    data2 = PicnicProductData(picnic_id="s1", name="New Name", brand=None,
+    # Second call without ean (e.g. seen in a delivery without reverse-lookup)
+    data2 = PicnicProductData(picnic_id="s1", ean=None, name="New Name",
                               unit_quantity=None, image_id=None, last_price_cents=120)
     await upsert_product(session, data2)
     await session.commit()
@@ -921,6 +987,56 @@ async def test_upsert_product_updates_existing(session: AsyncSession):
     row = await get_product(session, "s1")
     assert row.name == "New Name"
     assert row.last_price_cents == 120
+    assert row.ean == "4014400900057"  # preserved!
+
+
+@pytest.mark.asyncio
+async def test_upsert_product_updates_ean_when_provided(session: AsyncSession):
+    """If the caller provides a new ean, it wins."""
+    data1 = PicnicProductData(picnic_id="s1", ean=None, name="Vollmilch",
+                              unit_quantity=None, image_id=None, last_price_cents=100)
+    await upsert_product(session, data1)
+    await session.commit()
+
+    data2 = PicnicProductData(picnic_id="s1", ean="4014400900057", name="Vollmilch",
+                              unit_quantity=None, image_id=None, last_price_cents=100)
+    await upsert_product(session, data2)
+    await session.commit()
+
+    row = await get_product(session, "s1")
+    assert row.ean == "4014400900057"
+
+
+@pytest.mark.asyncio
+async def test_get_by_ean(session: AsyncSession):
+    from app.services.picnic.catalog import get_product_by_ean
+    data = PicnicProductData(picnic_id="s1", ean="4014400900057", name="Vollmilch",
+                             unit_quantity=None, image_id=None, last_price_cents=100)
+    await upsert_product(session, data)
+    await session.commit()
+
+    row = await get_product_by_ean(session, "4014400900057")
+    assert row is not None
+    assert row.picnic_id == "s1"
+
+
+@pytest.mark.asyncio
+async def test_get_by_ean_multiple_picks_most_recent(session: AsyncSession):
+    """Same EAN, different pack sizes → most recently seen wins."""
+    import asyncio
+    from app.services.picnic.catalog import get_product_by_ean
+    await upsert_product(session, PicnicProductData(
+        picnic_id="s1", ean="4014400900057", name="Vollmilch 500ml",
+        unit_quantity="500 ml", image_id=None, last_price_cents=50))
+    await session.commit()
+    await asyncio.sleep(0.05)  # ensure last_seen differs
+    await upsert_product(session, PicnicProductData(
+        picnic_id="s2", ean="4014400900057", name="Vollmilch 1L",
+        unit_quantity="1 L", image_id=None, last_price_cents=100))
+    await session.commit()
+
+    row = await get_product_by_ean(session, "4014400900057")
+    assert row.picnic_id == "s2"
 
 
 @pytest.mark.asyncio
@@ -954,9 +1070,17 @@ from app.models.picnic import PicnicProduct
 
 @dataclass(frozen=True)
 class PicnicProductData:
+    """Data we may know about a Picnic product.
+    
+    ean is None when we've only seen the product via a delivery line item (no
+    reverse lookup available). It's set when:
+      - a get_article_by_gtin(ean) call returned this product
+      - a user manually confirmed an EAN match during import review
+      - a user scanned a barcode during import review
+    """
     picnic_id: str
+    ean: str | None
     name: str
-    brand: str | None
     unit_quantity: str | None
     image_id: str | None
     last_price_cents: int | None
@@ -969,21 +1093,42 @@ async def get_product(session: AsyncSession, picnic_id: str) -> PicnicProduct | 
     return result.scalar_one_or_none()
 
 
+async def get_product_by_ean(session: AsyncSession, ean: str) -> PicnicProduct | None:
+    """Find the most-recently-seen Picnic product with this EAN.
+    
+    Multiple rows may share the same EAN (different pack sizes of the same product);
+    we return the one with the newest last_seen timestamp.
+    """
+    result = await session.execute(
+        select(PicnicProduct)
+        .where(PicnicProduct.ean == ean)
+        .order_by(PicnicProduct.last_seen.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def upsert_product(session: AsyncSession, data: PicnicProductData) -> PicnicProduct:
-    """Insert a new PicnicProduct or update all mutable fields on an existing row."""
+    """Insert a new PicnicProduct or update mutable fields on an existing row.
+    
+    The ean field is special: if the caller passes ean=None and the row already
+    has a non-null ean, the existing ean is preserved (don't clobber learned data).
+    If the caller passes a new ean, it wins (overwrites).
+    """
     existing = await get_product(session, data.picnic_id)
     if existing:
         existing.name = data.name
-        existing.brand = data.brand
         existing.unit_quantity = data.unit_quantity
         existing.image_id = data.image_id
         existing.last_price_cents = data.last_price_cents
+        if data.ean is not None:
+            existing.ean = data.ean
         return existing
 
     row = PicnicProduct(
         picnic_id=data.picnic_id,
+        ean=data.ean,
         name=data.name,
-        brand=data.brand,
         unit_quantity=data.unit_quantity,
         image_id=data.image_id,
         last_price_cents=data.last_price_cents,
@@ -999,7 +1144,7 @@ async def upsert_product(session: AsyncSession, data: PicnicProductData) -> Picn
 cd recipe-assistant/backend && pytest tests/services/picnic/test_catalog.py -v
 ```
 
-Expected: all 3 tests PASS.
+Expected: all 6 tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1010,14 +1155,22 @@ git commit -m "feat(picnic): add catalog cache service"
 
 ---
 
-## Task 6: Picnic Client Wrapper + Fake for Tests
+## Task 6: Picnic Client Wrapper + 2FA Setup CLI + Fake for Tests
 
 **Files:**
 - Create: `recipe-assistant/backend/app/services/picnic/client.py`
+- Create: `recipe-assistant/backend/app/services/picnic/setup.py` (2FA bootstrap CLI)
 - Create: `recipe-assistant/backend/tests/fixtures/__init__.py`
 - Create: `recipe-assistant/backend/tests/fixtures/picnic/__init__.py`
 - Create: `recipe-assistant/backend/tests/fixtures/picnic/fake_client.py`
 - Create: `recipe-assistant/backend/tests/fixtures/picnic/sample_deliveries.py`
+
+**Critical notes from empirical API probe (recorded 2026-04-05):**
+- Correct import is `from python_picnic_api2 import PicnicAPI, Picnic2FARequired, Picnic2FAError`. Earlier plan draft used the wrong name `picnicapi`.
+- `PicnicAPI.__init__` calls `login()` internally if username+password given. Login may raise `Picnic2FARequired`, which propagates from the constructor. To catch it cleanly: construct `PicnicAPI(country_code=…)` without credentials first, then call `api.login(u, p)` separately.
+- After a successful token is obtained (either first login or post-2FA), pass `auth_token=…` to the constructor to restore state on subsequent runs without any login at all.
+- Token is read off the session as `api.session.auth_token` (property).
+- `get_article_by_gtin(ean)` is the primary lookup method for cart sync. Returns `{name, id}` on hit, may return `None` or an error dict on miss (needs empirical test during implementation).
 
 - [ ] **Step 1: Create the abstract client interface + real wrapper**
 
@@ -1043,22 +1196,45 @@ class PicnicClientProtocol(Protocol):
     """Minimal interface we use. Lets tests swap in a FakePicnicClient."""
 
     async def search(self, query: str) -> list[dict[str, Any]]: ...
-    async def get_deliveries(self, summary: bool = True) -> list[dict[str, Any]]: ...
+    async def get_article_by_gtin(self, ean: str) -> dict[str, Any] | None: ...
+    async def get_deliveries(self) -> list[dict[str, Any]]: ...
     async def get_delivery(self, delivery_id: str) -> dict[str, Any]: ...
     async def get_cart(self) -> dict[str, Any]: ...
     async def add_product(self, picnic_id: str, count: int = 1) -> dict[str, Any]: ...
     async def get_user(self) -> dict[str, Any]: ...
 
 
+class PicnicNotConfigured(Exception):
+    """Raised when credentials are absent from addon config."""
+
+
+class PicnicReauthRequired(Exception):
+    """Raised when the cached token is invalid/missing and a fresh login triggers 2FA.
+    
+    The user must run `python -m app.services.picnic.setup` interactively to
+    obtain a new token. The HTTP layer surfaces this as a 503 with
+    {"error": "picnic_reauth_required"}.
+    """
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    s = str(exc).lower()
+    return "401" in s or "unauthor" in s
+
+
 class PicnicClient:
     """Thin async wrapper around python-picnic-api2 (which is sync).
-    
-    Uses asyncio.to_thread to avoid blocking the event loop. Auto re-logins once
-    on 401. Token is cached in /data/picnic_token.json.
+
+    Token lifecycle:
+      1. On first call, loads cached token from /data/picnic_token.json if present.
+      2. If token works (any API call returns cleanly), keep using it.
+      3. If token is missing or fails with 401, attempt a username+password login.
+      4. If that login raises Picnic2FARequired, surface as PicnicReauthRequired
+         (user must run setup CLI). We never try SMS flow from the HTTP path.
     """
 
     def __init__(self) -> None:
-        self._inner = None  # lazy init
+        self._inner = None
         self._lock = asyncio.Lock()
 
     def _load_token(self) -> str | None:
@@ -1073,32 +1249,47 @@ class PicnicClient:
         try:
             TOKEN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
             TOKEN_CACHE_PATH.write_text(json.dumps({"token": token}))
+            TOKEN_CACHE_PATH.chmod(0o600)
         except Exception as e:
             log.warning("could not persist picnic token: %s", e)
 
-    async def _ensure_ready(self) -> None:
-        if self._inner is not None:
+    async def _ensure_ready(self, force_relogin: bool = False) -> None:
+        if self._inner is not None and not force_relogin:
             return
         async with self._lock:
-            if self._inner is not None:
+            if self._inner is not None and not force_relogin:
                 return
-            from picnicapi import PicnicAPI  # import inside to allow tests to stub
-            settings = get_settings()
-            if not settings.picnic_email or not settings.picnic_password:
-                raise PicnicNotConfigured("PICNIC_EMAIL / PICNIC_PASSWORD not set")
 
-            def _login() -> Any:
-                api = PicnicAPI(
-                    username=settings.picnic_email,
-                    password=settings.picnic_password,
-                    country_code=settings.picnic_country_code or "DE",
-                )
+            from python_picnic_api2 import PicnicAPI, Picnic2FARequired
+
+            settings = get_settings()
+            country = settings.picnic_country_code or "DE"
+
+            cached_token = None if force_relogin else self._load_token()
+
+            def _build() -> Any:
+                if cached_token:
+                    return PicnicAPI(country_code=country, auth_token=cached_token)
+                if not settings.picnic_email or not settings.picnic_password:
+                    raise PicnicNotConfigured("PICNIC_MAIL / PICNIC_PASSWORD not set")
+                api = PicnicAPI(country_code=country)
+                try:
+                    api.login(settings.picnic_email, settings.picnic_password)
+                except Picnic2FARequired as e:
+                    raise PicnicReauthRequired(
+                        "2FA required - run `python -m app.services.picnic.setup` once"
+                    ) from e
                 return api
 
-            self._inner = await asyncio.to_thread(_login)
+            try:
+                self._inner = await asyncio.to_thread(_build)
+            except (PicnicNotConfigured, PicnicReauthRequired):
+                raise
+
+            # Persist the (possibly new) token for future runs.
             try:
                 token = getattr(self._inner.session, "auth_token", None)
-                if token:
+                if token and token != cached_token:
                     self._save_token(token)
             except Exception:
                 pass
@@ -1113,19 +1304,41 @@ class PicnicClient:
         try:
             return await asyncio.to_thread(_do)
         except Exception as e:
-            # Force re-login once on auth errors
             if _is_auth_error(e):
-                log.info("picnic auth error, retrying after re-login: %s", e)
-                self._inner = None
-                await self._ensure_ready()
+                log.info("picnic token rejected, attempting fresh login: %s", e)
+                # Invalidate cached token and retry once
+                try:
+                    TOKEN_CACHE_PATH.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                await self._ensure_ready(force_relogin=True)
                 return await asyncio.to_thread(_do)
             raise
 
     async def search(self, query: str) -> list[dict[str, Any]]:
         return await self._call("search", query)
 
-    async def get_deliveries(self, summary: bool = True) -> list[dict[str, Any]]:
-        return await self._call("get_deliveries", summary=summary)
+    async def get_article_by_gtin(self, ean: str) -> dict[str, Any] | None:
+        """Look up a Picnic product by EAN/GTIN.
+
+        Returns a dict with at least {"id", "name"} on hit, or None on miss.
+        The underlying library may return an error-shaped dict or raise on miss;
+        normalise both to None here.
+        """
+        try:
+            result = await self._call("get_article_by_gtin", ean)
+        except Exception as e:
+            if "not found" in str(e).lower() or "404" in str(e):
+                return None
+            raise
+        if not result:
+            return None
+        if isinstance(result, dict) and result.get("id") and result.get("name"):
+            return result
+        return None
+
+    async def get_deliveries(self) -> list[dict[str, Any]]:
+        return await self._call("get_deliveries")
 
     async def get_delivery(self, delivery_id: str) -> dict[str, Any]:
         return await self._call("get_delivery", delivery_id)
@@ -1140,16 +1353,6 @@ class PicnicClient:
         return await self._call("get_user")
 
 
-class PicnicNotConfigured(Exception):
-    """Raised when PICNIC_EMAIL / PICNIC_PASSWORD are absent."""
-
-
-def _is_auth_error(exc: Exception) -> bool:
-    # python-picnic-api2 raises generic errors with status in message
-    s = str(exc).lower()
-    return "401" in s or "unauthor" in s or "auth" in s
-
-
 # --- FastAPI dependency ---
 
 _client_singleton: PicnicClient | None = None
@@ -1162,6 +1365,88 @@ def get_picnic_client() -> PicnicClientProtocol:
         _client_singleton = PicnicClient()
     return _client_singleton
 ```
+
+- [ ] **Step 2: Create the 2FA setup CLI**
+
+Create `recipe-assistant/backend/app/services/picnic/setup.py`:
+
+```python
+"""Interactive 2FA bootstrap for Picnic.
+
+Usage (once per installation):
+    python -m app.services.picnic.setup
+
+Reads credentials from env vars (PICNIC_MAIL or PICNIC_EMAIL, PICNIC_PASSWORD,
+PICNIC_COUNTRY_CODE). Performs the full login flow, handles SMS 2FA by
+prompting on stdin, and writes the resulting auth token to
+/data/picnic_token.json (or $PICNIC_TOKEN_PATH if set, for local dev).
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+from python_picnic_api2 import PicnicAPI, Picnic2FAError, Picnic2FARequired
+
+
+def _token_path() -> Path:
+    return Path(os.environ.get("PICNIC_TOKEN_PATH", "/data/picnic_token.json"))
+
+
+def main() -> int:
+    email = os.environ.get("PICNIC_MAIL") or os.environ.get("PICNIC_EMAIL") or ""
+    password = os.environ.get("PICNIC_PASSWORD") or ""
+    country = os.environ.get("PICNIC_COUNTRY_CODE") or "DE"
+
+    if not email or not password:
+        print("error: set PICNIC_MAIL and PICNIC_PASSWORD in the environment", file=sys.stderr)
+        return 2
+
+    print(f"logging in as {email} ({country})...")
+    api = PicnicAPI(country_code=country)
+    try:
+        api.login(email, password)
+        print("login succeeded without 2FA")
+    except Picnic2FARequired:
+        print("2FA required. choose channel [SMS/EMAIL] (default SMS): ", end="", flush=True)
+        channel = (input().strip().upper() or "SMS")
+        api.generate_2fa_code(channel=channel)
+        print(f"code sent via {channel}. enter code: ", end="", flush=True)
+        code = input().strip()
+        try:
+            api.verify_2fa_code(code)
+        except Picnic2FAError as e:
+            print(f"verify failed: {e}", file=sys.stderr)
+            return 1
+        print("2FA verified")
+
+    token = api.session.auth_token
+    if not token:
+        print("error: no auth token in session after login", file=sys.stderr)
+        return 1
+
+    path = _token_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"token": token}))
+    path.chmod(0o600)
+    print(f"token written to {path}")
+
+    # Verify it actually works
+    try:
+        user = api.get_user()
+        print(f"verified: logged in as {user.get('firstname')} {user.get('lastname')}")
+    except Exception as e:
+        print(f"warning: could not verify token via get_user: {e}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+(The setup CLI is not unit-tested — it's an interactive one-shot tool. It's verified manually during Task 15's smoke test.)
 
 - [ ] **Step 2: Create sample fixture data**
 
@@ -1283,15 +1568,25 @@ class FakePicnicClient:
         self.search_results: dict[str, list[dict[str, Any]]] = {
             "milch": SAMPLE_SEARCH_MILK,
         }
+        # ean -> {"id": picnic_id, "name": ...} map for get_article_by_gtin
+        self.gtin_lookup: dict[str, dict[str, Any]] = {
+            "4014400900057": {"id": "s100", "name": "Ja! Vollmilch 1 L"},
+            "8000270013122": {"id": "s200", "name": "Barilla Spaghetti Nr. 5 500 g"},
+        }
         self.cart: dict[str, Any] = dict(SAMPLE_CART_EMPTY)
         self.user = dict(SAMPLE_USER)
         self.added_products: list[tuple[str, int]] = []
+        self.gtin_calls: list[str] = []  # track calls to get_article_by_gtin
         self.raise_on_add: dict[str, str] = {}  # picnic_id -> reason
 
     async def search(self, query: str) -> list[dict[str, Any]]:
         return self.search_results.get(query.lower(), [])
 
-    async def get_deliveries(self, summary: bool = True) -> list[dict[str, Any]]:
+    async def get_article_by_gtin(self, ean: str) -> dict[str, Any] | None:
+        self.gtin_calls.append(ean)
+        return self.gtin_lookup.get(ean)
+
+    async def get_deliveries(self) -> list[dict[str, Any]]:
         return self.deliveries_summary
 
     async def get_delivery(self, delivery_id: str) -> dict[str, Any]:
@@ -1333,8 +1628,8 @@ Expected: prints summary list, detail dict, and `[('s100', 2)]`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add recipe-assistant/backend/app/services/picnic/client.py recipe-assistant/backend/tests/fixtures/
-git commit -m "feat(picnic): add API client wrapper and test fake"
+git add recipe-assistant/backend/app/services/picnic/client.py recipe-assistant/backend/app/services/picnic/setup.py recipe-assistant/backend/tests/fixtures/
+git commit -m "feat(picnic): add API client wrapper, 2FA setup CLI, and test fake"
 ```
 
 ---
@@ -1357,7 +1652,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.database import Base
 from app.models.inventory import InventoryItem
 from app.models.picnic import (
-    EanPicnicMap,
     PicnicDeliveryImport,
     PicnicProduct,
     ShoppingListItem,
@@ -1391,7 +1685,7 @@ def fake_client() -> FakePicnicClient:
 
 
 @pytest.mark.asyncio
-async def test_fetch_returns_candidates_with_match_suggestions(session, fake_client):
+async def test_fetch_returns_candidates_with_fuzzy_match_suggestions(session, fake_client):
     # Pre-existing inventory with a Vollmilch that should fuzzy-match "Ja! Vollmilch 1L"
     session.add(
         InventoryItem(barcode="4014400900057", name="Vollmilch 3,5%", quantity=1, category="Milch")
@@ -1421,12 +1715,12 @@ async def test_fetch_skips_already_imported_deliveries(session, fake_client):
 
 
 @pytest.mark.asyncio
-async def test_fetch_uses_known_mapping_for_confidence_1(session, fake_client):
-    # User previously mapped EAN 999 to picnic_id s100
-    session.add(PicnicProduct(picnic_id="s100", name="Ja! Vollmilch 1 L"))
+async def test_fetch_uses_cached_ean_pairing_for_deterministic_match(session, fake_client):
+    """When picnic_products has an ean column set (learned from prior cart-sync
+    or scan), the import flow short-circuits fuzzy matching for that SKU."""
+    # Prior state: picnic_id s100 is already in cache with ean "999"
+    session.add(PicnicProduct(picnic_id="s100", ean="999", name="Ja! Vollmilch 1 L"))
     session.add(InventoryItem(barcode="999", name="Milk (ancient mislabel)", quantity=1, category="x"))
-    await session.flush()
-    session.add(EanPicnicMap(ean="999", picnic_id="s100", source="scan"))
     await session.commit()
 
     response = await fetch_import_candidates(session, fake_client)
@@ -1437,10 +1731,8 @@ async def test_fetch_uses_known_mapping_for_confidence_1(session, fake_client):
 
 
 @pytest.mark.asyncio
-async def test_commit_match_existing_increments_quantity(session, fake_client):
+async def test_commit_match_existing_increments_quantity_and_caches_ean(session, fake_client):
     session.add(InventoryItem(barcode="4014400900057", name="Vollmilch 3,5%", quantity=3, category="Milch"))
-    session.add(PicnicProduct(picnic_id="s100", name="Ja! Vollmilch 1 L"))
-    session.add(PicnicProduct(picnic_id="s200", name="Barilla Spaghetti"))
     await session.commit()
 
     result = await commit_import_decisions(
@@ -1464,11 +1756,11 @@ async def test_commit_match_existing_increments_quantity(session, fake_client):
     )).scalar_one()
     assert row.quantity == 5  # was 3, delivery had 2
 
-    mapping = (await session.execute(
-        select(EanPicnicMap).where(EanPicnicMap.ean == "4014400900057")
+    # The match action should have cached the ean on picnic_products.s100
+    cached = (await session.execute(
+        select(PicnicProduct).where(PicnicProduct.picnic_id == "s100")
     )).scalar_one()
-    assert mapping.picnic_id == "s100"
-    assert mapping.source == "user_confirmed"
+    assert cached.ean == "4014400900057"
 
     # Dedup record written
     imp = (await session.execute(
@@ -1482,10 +1774,6 @@ async def test_commit_match_existing_increments_quantity(session, fake_client):
 
 @pytest.mark.asyncio
 async def test_commit_create_new_with_synthetic_barcode(session, fake_client):
-    session.add(PicnicProduct(picnic_id="s100", name="Ja! Vollmilch 1 L"))
-    session.add(PicnicProduct(picnic_id="s200", name="Barilla Spaghetti"))
-    await session.commit()
-
     await commit_import_decisions(
         session,
         fake_client,
@@ -1510,11 +1798,7 @@ async def test_commit_create_new_with_synthetic_barcode(session, fake_client):
 
 
 @pytest.mark.asyncio
-async def test_commit_scanned_ean_during_create_promotes(session, fake_client):
-    session.add(PicnicProduct(picnic_id="s100", name="Ja! Vollmilch 1 L"))
-    session.add(PicnicProduct(picnic_id="s200", name="Barilla Spaghetti"))
-    await session.commit()
-
+async def test_commit_scanned_ean_during_create_promotes_and_caches(session, fake_client):
     await commit_import_decisions(
         session,
         fake_client,
@@ -1537,10 +1821,10 @@ async def test_commit_scanned_ean_during_create_promotes(session, fake_client):
     )).scalar_one()
     assert row.quantity == 2
 
-    mapping = (await session.execute(
-        select(EanPicnicMap).where(EanPicnicMap.ean == "4014400900057")
+    cached = (await session.execute(
+        select(PicnicProduct).where(PicnicProduct.picnic_id == "s100")
     )).scalar_one()
-    assert mapping.source == "scan"
+    assert cached.ean == "4014400900057"
 
 
 @pytest.mark.asyncio
@@ -1580,10 +1864,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.inventory import InventoryItem
 from app.models.picnic import (
-    EanPicnicMap,
     PicnicDeliveryImport,
     PicnicProduct,
-    ShoppingListItem,  # noqa: F401
 )
 from app.schemas.picnic import (
     ImportCandidate,
@@ -1661,26 +1943,25 @@ async def _suggestions_for_item(
     picnic_unit_quantity: str | None,
     candidates: list[MatchCandidate],
 ) -> list[MatchSuggestion]:
-    # First: exact match via ean_picnic_map
-    mapped = await session.execute(
-        select(EanPicnicMap).where(EanPicnicMap.picnic_id == picnic_id)
-    )
-    existing_map = mapped.scalar_one_or_none()
-    if existing_map:
-        inv = await session.execute(
-            select(InventoryItem).where(InventoryItem.barcode == existing_map.ean)
-        )
-        inv_row = inv.scalar_one_or_none()
-        if inv_row:
+    # Step 1: deterministic hit via cached ean on picnic_products
+    cached = (await session.execute(
+        select(PicnicProduct).where(PicnicProduct.picnic_id == picnic_id)
+    )).scalar_one_or_none()
+    if cached and cached.ean:
+        inv = (await session.execute(
+            select(InventoryItem).where(InventoryItem.barcode == cached.ean)
+        )).scalar_one_or_none()
+        if inv:
             return [
                 MatchSuggestion(
-                    inventory_barcode=inv_row.barcode,
-                    inventory_name=inv_row.name,
+                    inventory_barcode=inv.barcode,
+                    inventory_name=inv.name,
                     score=100.0,
                     reason="known mapping",
                 )
             ]
 
+    # Step 2: fuzzy name match fallback
     fuzz_results = compute_match_suggestions(picnic_name, picnic_unit_quantity, candidates)
     return [
         MatchSuggestion(
@@ -1698,7 +1979,7 @@ async def fetch_import_candidates(
     client: PicnicClientProtocol,
 ) -> ImportFetchResponse:
     """Fetch delivered-but-not-yet-imported Picnic orders with match suggestions."""
-    summary = await client.get_deliveries(summary=True)
+    summary = await client.get_deliveries()
 
     deliveries_out: list[ImportDelivery] = []
     candidates = await _load_inventory_match_candidates(session)
@@ -1715,14 +1996,15 @@ async def fetch_import_candidates(
         if not items_flat:
             continue
 
-        # Cache picnic products as we go (opportunistic)
+        # Cache picnic products as we go (opportunistic; ean=None preserves any
+        # existing ean learned from prior cart-sync or scan).
         for item in items_flat:
             await upsert_product(
                 session,
                 PicnicProductData(
                     picnic_id=item["picnic_id"],
+                    ean=None,
                     name=item["name"],
-                    brand=None,
                     unit_quantity=item.get("unit_quantity"),
                     image_id=item.get("image_id"),
                     last_price_cents=item.get("price_cents"),
@@ -1771,9 +2053,10 @@ async def commit_import_decisions(
 ) -> ImportCommitResponse:
     """Apply user decisions transactionally.
 
-    - match_existing: increment quantity, add mapping (user_confirmed or scan if scanned_ean given)
-    - create_new: create InventoryItem with synthetic or scanned barcode, add mapping
-    - skip: no-op
+    - match_existing: increment inventory quantity + cache ean on picnic_products
+    - create_new:     create InventoryItem with synthetic or scanned barcode,
+                      cache ean on picnic_products if scanned
+    - skip:           no-op
     """
     if await _already_imported(session, delivery_id):
         raise ValueError(f"delivery {delivery_id} already imported")
@@ -1807,26 +2090,28 @@ async def commit_import_decisions(
             item = result.scalar_one()
             item.quantity += qty
 
-            source = "scan" if decision.scanned_ean else "user_confirmed"
-            await _upsert_mapping(
+            # Cache the pairing on picnic_products so future resolutions are deterministic.
+            await _cache_ean_pairing(
                 session,
-                ean=decision.target_barcode,
                 picnic_id=decision.picnic_id,
-                source=source,
+                ean=decision.target_barcode,
+                picnic_name=line["name"],
+                unit_quantity=line.get("unit_quantity"),
+                image_id=line.get("image_id"),
+                price_cents=line.get("price_cents"),
             )
             imported += 1
             continue
 
         if decision.action == "create_new":
             if decision.scanned_ean:
-                # Scanned real EAN — either merge into existing or create with real EAN
+                # Scanned real EAN - either merge into existing or create with real EAN
                 existing = (await session.execute(
                     select(InventoryItem).where(InventoryItem.barcode == decision.scanned_ean)
                 )).scalar_one_or_none()
 
                 if existing:
                     existing.quantity += qty
-                    # Apply optional fields from decision
                     if decision.storage_location:
                         existing.storage_location_id = await _resolve_location(session, decision.storage_location)
                     if decision.expiration_date:
@@ -1843,11 +2128,14 @@ async def commit_import_decisions(
                     ))
                     created += 1
 
-                await _upsert_mapping(
+                await _cache_ean_pairing(
                     session,
-                    ean=decision.scanned_ean,
                     picnic_id=decision.picnic_id,
-                    source="scan",
+                    ean=decision.scanned_ean,
+                    picnic_name=line["name"],
+                    unit_quantity=line.get("unit_quantity"),
+                    image_id=line.get("image_id"),
+                    price_cents=line.get("price_cents"),
                 )
             else:
                 synthetic = f"picnic:{decision.picnic_id}"
@@ -1882,7 +2170,7 @@ async def commit_import_decisions(
 
 
 async def _resolve_location(session: AsyncSession, name: str | None) -> int | None:
-    """Resolve storage location name → id, creating the location if missing."""
+    """Resolve storage location name -> id, creating the location if missing."""
     if not name:
         return None
     from app.models.inventory import StorageLocation
@@ -1896,21 +2184,29 @@ async def _resolve_location(session: AsyncSession, name: str | None) -> int | No
     return new_loc.id
 
 
-async def _upsert_mapping(session: AsyncSession, ean: str, picnic_id: str, source: str) -> None:
-    """Insert an ean_picnic_map row; if the (ean, picnic_id) pair already exists,
-    update the source only if the new source is stronger (scan > user_confirmed > auto)."""
-    strength = {"auto": 1, "user_confirmed": 2, "scan": 3}
-    result = await session.execute(
-        select(EanPicnicMap).where(
-            EanPicnicMap.ean == ean, EanPicnicMap.picnic_id == picnic_id
-        )
+async def _cache_ean_pairing(
+    session: AsyncSession,
+    *,
+    picnic_id: str,
+    ean: str,
+    picnic_name: str,
+    unit_quantity: str | None,
+    image_id: str | None,
+    price_cents: int | None,
+) -> None:
+    """Upsert picnic_products with the learned ean. If the row exists with a
+    different (older) ean, overwrite - the latest user action wins."""
+    await upsert_product(
+        session,
+        PicnicProductData(
+            picnic_id=picnic_id,
+            ean=ean,
+            name=picnic_name,
+            unit_quantity=unit_quantity,
+            image_id=image_id,
+            last_price_cents=price_cents,
+        ),
     )
-    existing = result.scalar_one_or_none()
-    if existing:
-        if strength.get(source, 0) > strength.get(existing.source, 0):
-            existing.source = source
-        return
-    session.add(EanPicnicMap(ean=ean, picnic_id=picnic_id, source=source))
 ```
 
 - [ ] **Step 4: Run tests**
@@ -1946,7 +2242,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base
-from app.models.picnic import EanPicnicMap, PicnicProduct, ShoppingListItem
+from app.models.picnic import PicnicProduct, ShoppingListItem
 from app.services.picnic.cart import (
     resolve_shopping_list_status,
     sync_shopping_list_to_cart,
@@ -1969,44 +2265,71 @@ async def session():
     await engine.dispose()
 
 
+@pytest.fixture
+def client():
+    return FakePicnicClient()
+
+
 @pytest.mark.asyncio
-async def test_resolve_status_mapped_via_direct_picnic_id(session):
-    session.add(PicnicProduct(picnic_id="s100", name="Milk"))
+async def test_resolve_status_mapped_via_explicit_picnic_id(session, client):
+    """Item added with an explicit picnic_id is mapped without any lookup."""
     session.add(ShoppingListItem(name="Milch", quantity=1, picnic_id="s100"))
     await session.commit()
 
-    items = await resolve_shopping_list_status(session)
-    assert items[0].picnic_status == "mapped"
-
-
-@pytest.mark.asyncio
-async def test_resolve_status_mapped_via_ean_map(session):
-    session.add(PicnicProduct(picnic_id="s100", name="Milk"))
-    await session.flush()
-    session.add(EanPicnicMap(ean="4014400900057", picnic_id="s100", source="scan"))
-    session.add(ShoppingListItem(name="Milch", quantity=1, inventory_barcode="4014400900057"))
-    await session.commit()
-
-    items = await resolve_shopping_list_status(session)
+    items = await resolve_shopping_list_status(session, client)
     assert items[0].picnic_status == "mapped"
     assert items[0].picnic_id == "s100"
 
 
 @pytest.mark.asyncio
-async def test_resolve_status_unmapped(session):
-    session.add(ShoppingListItem(name="Exotisches", quantity=1, inventory_barcode="9999999999999"))
+async def test_resolve_status_hits_cached_ean_pairing(session, client):
+    """Item with inventory_barcode resolves via picnic_products cache (no live lookup)."""
+    session.add(PicnicProduct(picnic_id="s100", ean="4014400900057", name="Ja! Vollmilch 1 L"))
+    session.add(ShoppingListItem(name="Milch", quantity=1, inventory_barcode="4014400900057"))
     await session.commit()
 
-    items = await resolve_shopping_list_status(session)
-    assert items[0].picnic_status == "unmapped"
+    items = await resolve_shopping_list_status(session, client)
+    assert items[0].picnic_status == "mapped"
+    assert items[0].picnic_id == "s100"
+    assert items[0].picnic_name == "Ja! Vollmilch 1 L"
+    # Must not have hit the live API since the cache was warm
+    assert client.gtin_calls == []  # see fake below - we'll track calls
 
 
 @pytest.mark.asyncio
-async def test_sync_adds_mapped_items_to_cart(session):
-    client = FakePicnicClient()
-    session.add(PicnicProduct(picnic_id="s100", name="Milk"))
+async def test_resolve_status_uses_live_gtin_lookup_and_caches(session, client):
+    """Item with inventory_barcode and no cache entry triggers a live lookup and caches the result."""
+    session.add(ShoppingListItem(name="Milch", quantity=1, inventory_barcode="4014400900057"))
+    await session.commit()
+
+    items = await resolve_shopping_list_status(session, client)
+    assert items[0].picnic_status == "mapped"
+    assert items[0].picnic_id == "s100"
+    assert "4014400900057" in client.gtin_calls
+
+    # Verify it was cached in picnic_products
+    from sqlalchemy import select
+    cached = (await session.execute(
+        select(PicnicProduct).where(PicnicProduct.ean == "4014400900057")
+    )).scalar_one()
+    assert cached.picnic_id == "s100"
+
+
+@pytest.mark.asyncio
+async def test_resolve_status_unavailable_when_gtin_lookup_misses(session, client):
+    """Item with inventory_barcode that Picnic doesn't carry becomes 'unavailable'."""
+    session.add(ShoppingListItem(name="Dr.OetkerHefe", quantity=1, inventory_barcode="9999999999999"))
+    await session.commit()
+
+    items = await resolve_shopping_list_status(session, client)
+    assert items[0].picnic_status == "unavailable"
+    assert items[0].picnic_id is None
+
+
+@pytest.mark.asyncio
+async def test_sync_adds_mapped_items_to_cart(session, client):
     session.add(ShoppingListItem(name="Milch", quantity=2, picnic_id="s100"))
-    session.add(ShoppingListItem(name="Exotisches", quantity=1))  # unmapped
+    session.add(ShoppingListItem(name="Nothing", quantity=1, inventory_barcode="9999999999999"))  # unavailable
     await session.commit()
 
     response = await sync_shopping_list_to_cart(session, client)
@@ -2016,11 +2339,8 @@ async def test_sync_adds_mapped_items_to_cart(session):
 
 
 @pytest.mark.asyncio
-async def test_sync_reports_failures_per_item(session):
-    client = FakePicnicClient()
+async def test_sync_reports_failures_per_item(session, client):
     client.raise_on_add = {"s200": "product_unavailable"}
-    session.add(PicnicProduct(picnic_id="s100", name="Milk"))
-    session.add(PicnicProduct(picnic_id="s200", name="Pasta"))
     session.add(ShoppingListItem(name="Milch", quantity=1, picnic_id="s100"))
     session.add(ShoppingListItem(name="Nudeln", quantity=1, picnic_id="s200"))
     await session.commit()
@@ -2032,6 +2352,8 @@ async def test_sync_reports_failures_per_item(session):
     assert failed.picnic_id == "s200"
     assert "unavailable" in (failed.failure_reason or "").lower()
 ```
+
+**Note:** The tests above reference `client.gtin_calls`, a tracking list on `FakePicnicClient`. Add this to the fake (if not already present in Task 6) — see Step 3a below.
 
 - [ ] **Step 2: Run to confirm failure**
 
@@ -2048,58 +2370,103 @@ Create `recipe-assistant/backend/app/services/picnic/cart.py`:
 ```python
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.picnic import EanPicnicMap, ShoppingListItem
+from app.models.picnic import PicnicProduct, ShoppingListItem
 from app.schemas.picnic import (
     CartSyncItemResult,
     CartSyncResponse,
     ShoppingListItemResponse,
 )
+from app.services.picnic.catalog import (
+    PicnicProductData,
+    get_product,
+    get_product_by_ean,
+    upsert_product,
+)
 from app.services.picnic.client import PicnicClientProtocol
 
 
-async def _resolve_picnic_id(session: AsyncSession, item: ShoppingListItem) -> str | None:
-    """Determine which picnic_id applies to a shopping list row."""
+@dataclass(frozen=True)
+class Resolution:
+    picnic_id: str | None
+    picnic_name: str | None
+
+
+async def _resolve(
+    session: AsyncSession,
+    client: PicnicClientProtocol,
+    item: ShoppingListItem,
+) -> Resolution:
+    """Three-step resolution:
+
+    1. If the shopping list row has an explicit picnic_id, fetch its name from
+       the cache and return immediately.
+    2. If the row has an inventory_barcode and the picnic_products cache already
+       has an entry for that EAN, use it.
+    3. Otherwise, if the row has an inventory_barcode, call get_article_by_gtin
+       live, cache the result (or the absence of a hit), and return.
+    """
     if item.picnic_id:
-        return item.picnic_id
+        cached = await get_product(session, item.picnic_id)
+        return Resolution(picnic_id=item.picnic_id, picnic_name=cached.name if cached else None)
+
     if item.inventory_barcode:
-        result = await session.execute(
-            select(EanPicnicMap)
-            .where(EanPicnicMap.ean == item.inventory_barcode)
-            .order_by(EanPicnicMap.created_at.desc())
-        )
-        row = result.scalars().first()
-        if row:
-            return row.picnic_id
-    return None
+        cached = await get_product_by_ean(session, item.inventory_barcode)
+        if cached:
+            return Resolution(picnic_id=cached.picnic_id, picnic_name=cached.name)
+
+        result = await client.get_article_by_gtin(item.inventory_barcode)
+        if result and result.get("id") and result.get("name"):
+            await upsert_product(
+                session,
+                PicnicProductData(
+                    picnic_id=result["id"],
+                    ean=item.inventory_barcode,
+                    name=result["name"],
+                    unit_quantity=None,
+                    image_id=None,
+                    last_price_cents=None,
+                ),
+            )
+            return Resolution(picnic_id=result["id"], picnic_name=result["name"])
+
+    return Resolution(picnic_id=None, picnic_name=None)
 
 
-async def resolve_shopping_list_status(session: AsyncSession) -> list[ShoppingListItemResponse]:
-    """Return all shopping list items with their Picnic resolution status."""
+async def resolve_shopping_list_status(
+    session: AsyncSession,
+    client: PicnicClientProtocol,
+) -> list[ShoppingListItemResponse]:
+    """Return all shopping list items with their Picnic resolution status.
+
+    This may trigger live get_article_by_gtin calls for uncached items. Results
+    are cached in picnic_products for future calls.
+    """
     result = await session.execute(select(ShoppingListItem).order_by(ShoppingListItem.added_at))
     items = result.scalars().all()
 
     out: list[ShoppingListItemResponse] = []
     for item in items:
-        resolved = await _resolve_picnic_id(session, item)
-        status: str
-        if resolved:
-            status = "mapped"
-        else:
-            status = "unmapped"
+        resolution = await _resolve(session, client, item)
+        status = "mapped" if resolution.picnic_id else "unavailable"
         out.append(
             ShoppingListItemResponse(
                 id=item.id,
                 inventory_barcode=item.inventory_barcode,
-                picnic_id=resolved,
+                picnic_id=resolution.picnic_id,
+                picnic_name=resolution.picnic_name,
                 name=item.name,
                 quantity=item.quantity,
                 picnic_status=status,  # type: ignore[arg-type]
                 added_at=item.added_at,
             )
         )
+
+    await session.flush()  # persist any cache upserts from live lookups
     return out
 
 
@@ -2108,38 +2475,37 @@ async def sync_shopping_list_to_cart(
     client: PicnicClientProtocol,
 ) -> CartSyncResponse:
     """Push every mapped shopping list item into the real Picnic cart.
-    
+
     Per-item tracking; does NOT roll back on partial failure. Items that succeed
     stay in the Picnic cart; items that failed are reported.
     """
-    result = await session.execute(select(ShoppingListItem))
-    items = result.scalars().all()
+    db_items = (await session.execute(select(ShoppingListItem))).scalars().all()
 
     results: list[CartSyncItemResult] = []
     added_count = 0
     failed_count = 0
     skipped_count = 0
 
-    for item in items:
-        picnic_id = await _resolve_picnic_id(session, item)
-        if not picnic_id:
+    for item in db_items:
+        resolution = await _resolve(session, client, item)
+        if not resolution.picnic_id:
             results.append(
                 CartSyncItemResult(
                     shopping_list_id=item.id,
                     picnic_id=None,
                     status="skipped_unmapped",
-                    failure_reason=None,
+                    failure_reason="nicht bei Picnic verfügbar",
                 )
             )
             skipped_count += 1
             continue
 
         try:
-            await client.add_product(picnic_id, count=item.quantity)
+            await client.add_product(resolution.picnic_id, count=item.quantity)
             results.append(
                 CartSyncItemResult(
                     shopping_list_id=item.id,
-                    picnic_id=picnic_id,
+                    picnic_id=resolution.picnic_id,
                     status="added",
                     failure_reason=None,
                 )
@@ -2152,12 +2518,14 @@ async def sync_shopping_list_to_cart(
             results.append(
                 CartSyncItemResult(
                     shopping_list_id=item.id,
-                    picnic_id=picnic_id,
+                    picnic_id=resolution.picnic_id,
                     status="failed",
                     failure_reason=reason,
                 )
             )
             failed_count += 1
+
+    await session.flush()
 
     return CartSyncResponse(
         results=results,
@@ -2173,7 +2541,7 @@ async def sync_shopping_list_to_cart(
 cd recipe-assistant/backend && pytest tests/services/picnic/test_cart.py -v
 ```
 
-Expected: all 5 tests PASS.
+Expected: all 6 tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -2204,13 +2572,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models.picnic import EanPicnicMap, ShoppingListItem
+from app.models.picnic import PicnicProduct, ShoppingListItem
 from app.schemas.picnic import (
     CartSyncResponse,
-    EanPicnicMapResponse,
     ImportCommitRequest,
     ImportCommitResponse,
     ImportFetchResponse,
+    PicnicProductCacheEntry,
     PicnicSearchResponse,
     PicnicSearchResult,
     PicnicStatusResponse,
@@ -2223,6 +2591,7 @@ from app.services.picnic.catalog import PicnicProductData, upsert_product
 from app.services.picnic.client import (
     PicnicClientProtocol,
     PicnicNotConfigured,
+    PicnicReauthRequired,
     get_picnic_client,
 )
 from app.services.picnic.import_flow import (
@@ -2262,6 +2631,11 @@ async def status(client: PicnicClientProtocol = Depends(get_picnic_client)):
         )
     except PicnicNotConfigured:
         return PicnicStatusResponse(enabled=False, account=None)
+    except PicnicReauthRequired:
+        # Feature is configured but the cached token is gone and 2FA is required.
+        # Report as disabled so the frontend hides the UI; a banner should tell
+        # the user to run the setup CLI.
+        return PicnicStatusResponse(enabled=False, account=None)
     except Exception as e:
         raise HTTPException(status_code=503, detail={"error": "picnic_auth_failed", "detail": str(e)})
 
@@ -2278,6 +2652,8 @@ async def import_fetch(
         return response
     except PicnicNotConfigured:
         raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
 
 
 @router.post("/import/commit", response_model=ImportCommitResponse)
@@ -2293,6 +2669,8 @@ async def import_commit(
         return response
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
 
 
 @router.get("/search", response_model=PicnicSearchResponse)
@@ -2301,6 +2679,8 @@ async def search(
     client: PicnicClientProtocol = Depends(get_picnic_client),
     db: AsyncSession = Depends(get_db),
 ):
+    """Free-text Picnic catalog search. Optional fallback for the rare case
+    where an inventory item has no EAN or get_article_by_gtin missed."""
     _require_enabled()
     raw = await client.search(q)
     # python-picnic-api2 returns list of groups; flatten items
@@ -2315,8 +2695,8 @@ async def search(
                 db,
                 PicnicProductData(
                     picnic_id=pid,
+                    ean=None,
                     name=name,
-                    brand=None,
                     unit_quantity=item.get("unit_quantity"),
                     image_id=item.get("image_id"),
                     last_price_cents=item.get("display_price"),
@@ -2326,7 +2706,6 @@ async def search(
                 PicnicSearchResult(
                     picnic_id=pid,
                     name=name,
-                    brand=None,
                     unit_quantity=item.get("unit_quantity"),
                     image_id=item.get("image_id"),
                     price_cents=item.get("display_price"),
@@ -2337,14 +2716,23 @@ async def search(
 
 
 @router.get("/shopping-list", response_model=list[ShoppingListItemResponse])
-async def get_shopping_list(db: AsyncSession = Depends(get_db)):
+async def get_shopping_list(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    db: AsyncSession = Depends(get_db),
+):
     _require_enabled()
-    return await resolve_shopping_list_status(db)
+    try:
+        items = await resolve_shopping_list_status(db, client)
+        await db.commit()
+        return items
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
 
 
 @router.post("/shopping-list", response_model=ShoppingListItemResponse, status_code=201)
 async def add_shopping_list_item(
     req: ShoppingListAddRequest,
+    client: PicnicClientProtocol = Depends(get_picnic_client),
     db: AsyncSession = Depends(get_db),
 ):
     _require_enabled()
@@ -2357,7 +2745,11 @@ async def add_shopping_list_item(
     db.add(item)
     await db.commit()
     await db.refresh(item)
-    items = await resolve_shopping_list_status(db)
+    try:
+        items = await resolve_shopping_list_status(db, client)
+        await db.commit()
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
     return next(i for i in items if i.id == item.id)
 
 
@@ -2365,6 +2757,7 @@ async def add_shopping_list_item(
 async def update_shopping_list_item(
     item_id: int,
     req: ShoppingListUpdateRequest,
+    client: PicnicClientProtocol = Depends(get_picnic_client),
     db: AsyncSession = Depends(get_db),
 ):
     _require_enabled()
@@ -2377,7 +2770,11 @@ async def update_shopping_list_item(
     if req.picnic_id is not None:
         item.picnic_id = req.picnic_id
     await db.commit()
-    items = await resolve_shopping_list_status(db)
+    try:
+        items = await resolve_shopping_list_status(db, client)
+        await db.commit()
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
     return next(i for i in items if i.id == item_id)
 
 
@@ -2399,24 +2796,31 @@ async def sync_cart(
     db: AsyncSession = Depends(get_db),
 ):
     _require_enabled()
-    return await sync_shopping_list_to_cart(db, client)
+    try:
+        response = await sync_shopping_list_to_cart(db, client)
+        await db.commit()
+        return response
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
 
 
-@router.get("/mappings", response_model=list[EanPicnicMapResponse])
-async def list_mappings(db: AsyncSession = Depends(get_db)):
+@router.get("/cache", response_model=list[PicnicProductCacheEntry])
+async def list_cache(db: AsyncSession = Depends(get_db)):
+    """Admin/debug: list cached picnic_products entries (shows ean pairings)."""
     _require_enabled()
-    result = await db.execute(select(EanPicnicMap).order_by(EanPicnicMap.created_at.desc()))
+    result = await db.execute(select(PicnicProduct).order_by(PicnicProduct.last_seen.desc()))
     return result.scalars().all()
 
 
-@router.delete("/mappings/{mapping_id}")
-async def delete_mapping(mapping_id: int, db: AsyncSession = Depends(get_db)):
+@router.delete("/cache/{picnic_id}")
+async def clear_cache_entry(picnic_id: str, db: AsyncSession = Depends(get_db)):
+    """Admin/debug: clear a cache entry so the next lookup refetches from Picnic."""
     _require_enabled()
-    result = await db.execute(select(EanPicnicMap).where(EanPicnicMap.id == mapping_id))
-    mapping = result.scalar_one_or_none()
-    if not mapping:
+    result = await db.execute(select(PicnicProduct).where(PicnicProduct.picnic_id == picnic_id))
+    row = result.scalar_one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail="not found")
-    await db.delete(mapping)
+    await db.delete(row)
     await db.commit()
     return {"message": "deleted"}
 ```
@@ -2460,8 +2864,8 @@ from tests.fixtures.picnic.fake_client import FakePicnicClient
 def override_picnic_client(monkeypatch):
     fake = FakePicnicClient()
     app.dependency_overrides[get_picnic_client] = lambda: fake
-    # Enable feature flag
-    monkeypatch.setenv("PICNIC_EMAIL", "test@example.com")
+    # Enable feature flag (use either PICNIC_MAIL or PICNIC_EMAIL alias - test both in separate tests if needed)
+    monkeypatch.setenv("PICNIC_MAIL", "test@example.com")
     monkeypatch.setenv("PICNIC_PASSWORD", "secret")
     # Clear settings cache
     from app.config import get_settings
@@ -2626,16 +3030,16 @@ export interface ShoppingListItem {
   id: number;
   inventory_barcode: string | null;
   picnic_id: string | null;
+  picnic_name: string | null;
   name: string;
   quantity: number;
-  picnic_status: "mapped" | "unmapped" | "missing";
+  picnic_status: "mapped" | "unavailable";
   added_at: string;
 }
 
 export interface PicnicSearchResult {
   picnic_id: string;
   name: string;
-  brand: string | null;
   unit_quantity: string | null;
   image_id: string | null;
   price_cents: number | null;
@@ -3174,7 +3578,7 @@ export default function ShoppingListPage() {
   const [syncResult, setSyncResult] = useState<CartSyncResponse | null>(null);
 
   const statusColor = (status: string) =>
-    status === "mapped" ? "text-green-600" : "text-yellow-600";
+    status === "mapped" ? "text-green-600" : "text-red-600";
 
   const handleSync = async () => {
     const result = await sync();
@@ -3220,8 +3624,16 @@ export default function ShoppingListPage() {
       <ul className="space-y-2">
         {items.map((item) => (
           <li key={item.id} className="flex items-center gap-2 border rounded p-2">
-            <span className={`font-bold ${statusColor(item.picnic_status)}`}>●</span>
-            <span className="flex-1">{item.name}</span>
+            <span className={`font-bold ${statusColor(item.picnic_status)}`} title={item.picnic_status === "mapped" ? "bei Picnic verfügbar" : "nicht bei Picnic verfügbar"}>●</span>
+            <div className="flex-1">
+              <div>{item.name}</div>
+              {item.picnic_status === "mapped" && item.picnic_name && item.picnic_name !== item.name && (
+                <div className="text-xs text-gray-500">→ {item.picnic_name}</div>
+              )}
+              {item.picnic_status === "unavailable" && (
+                <div className="text-xs text-red-500">nicht bei Picnic verfügbar</div>
+              )}
+            </div>
             <input
               type="number"
               min={1}
@@ -3251,7 +3663,7 @@ export default function ShoppingListPage() {
       {syncResult && (
         <div className="mt-4 border rounded p-3">
           <div>Hinzugefügt: {syncResult.added_count}</div>
-          <div>Übersprungen (ohne Mapping): {syncResult.skipped_count}</div>
+          <div>Übersprungen (nicht bei Picnic verfügbar): {syncResult.skipped_count}</div>
           <div>Fehlgeschlagen: {syncResult.failed_count}</div>
           {syncResult.failed_count > 0 && (
             <ul className="mt-2 text-sm text-red-600">
@@ -3374,7 +3786,7 @@ Expected: no TypeScript errors, successful build.
 cd recipe-assistant/backend && alembic upgrade head --sql | tail -40
 ```
 
-Expected: SQL output shows CREATE TABLE statements for `picnic_products`, `ean_picnic_map`, `picnic_delivery_imports`, `shopping_list`. No errors.
+Expected: SQL output shows CREATE TABLE statements for `picnic_products` (with the `ean` column indexed), `picnic_delivery_imports`, `shopping_list`. No errors.
 
 - [ ] **Step 4: Verify the addon builds inside the Docker image**
 
@@ -3428,27 +3840,32 @@ Verify by running:
 git log --oneline main..HEAD
 ```
 
-Expected: ~14 commits, one per task, all descriptive. Feature is complete.
+Expected: ~15 commits (Tasks 1, 1b, 2–14 + optional smoke fixups), one per task, all descriptive. Feature is complete.
 
 ---
 
-## Self-Review Notes
+## Self-Review Notes (v2)
 
-This plan has been checked against the spec:
+This plan has been checked against the v2 spec:
 
-- **Spec coverage:**
+- **Spec coverage (v2):**
   - Architecture (services/picnic/ sub-package) → Tasks 4–8
-  - Data model (4 tables) → Task 2
+  - Data model (3 tables: picnic_products w/ embedded ean, picnic_delivery_imports, shopping_list) → Task 2
   - Pydantic schemas → Task 3
-  - API endpoints (11 endpoints) → Task 9
-  - Matching algorithm (normalize, score, tiers, N:M) → Task 4
+  - API endpoints (under /api/picnic/*) → Task 9
+  - Resolution strategy (GTIN-first cart sync; cached-ean-first import flow, fuzzy fallback) → Tasks 7 (import), 8 (cart)
+  - Matching algorithm (fallback only) → Task 4
   - UI flows (import review, shopping list, scan-during-review) → Tasks 12–14
-  - Error handling (503 on disabled, auth retry, transactional commit) → Tasks 6, 7, 9
-  - Testing (unit + integration, fake client) → Tasks 4–9
+  - Error handling (503 on disabled, 503 on reauth-required, auth retry, transactional commit) → Tasks 6, 7, 9
+  - Testing (unit + integration, fake client with gtin_lookup dict) → Tasks 4–9
   - Synthetic barcode + promotion → Task 7 (commit_import_decisions with scanned_ean)
   - HA addon config schema → Task 1
-  - Feature gating via PICNIC_EMAIL → Task 9 (_feature_enabled)
+  - PICNIC_MAIL env var alias → Task 1b
+  - 2FA bootstrap CLI → Task 6
+  - Feature gating via PICNIC_MAIL + cached token → Task 9 (_feature_enabled)
 
-- **Placeholder scan:** No "TBD", "TODO", "add appropriate error handling", or similar phrases in step bodies. Navbar step (14.2) and InventoryPage integration step (14.3–4) describe the change textually rather than showing full code because the implementer needs to match existing styling patterns that vary by file; the instructions are specific about what to import, which API to call, and what state to render against.
+- **Placeholder scan:** No "TBD", "TODO", or similar phrases in step bodies. Navbar step (14.2) and InventoryPage integration step (14.3–4) describe the change textually rather than showing full code because the implementer needs to match existing styling patterns; the instructions are specific about what to import and how to call it.
 
-- **Type consistency:** `PicnicClient.add_product(picnic_id, count=1)` used in Tasks 6, 8, 9. `compute_match_suggestions` signature consistent between Tasks 4 and 7. `ImportDecision` shape consistent across schemas (Task 3), service (Task 7), router (Task 9), and frontend (Task 10).
+- **Type consistency:** `PicnicClient.add_product(picnic_id, count=1)` used in Tasks 6, 8, 9. `PicnicClient.get_article_by_gtin(ean) -> dict | None` used in Tasks 6, 8. `get_product_by_ean` defined in Task 5 and consumed in Task 8. `PicnicProductData.ean` (nullable) is defined in Task 5 and used wherever upsert_product is called (Tasks 7, 8, 9). `ImportDecision` shape consistent across schemas (Task 3), service (Task 7), router (Task 9), and frontend (Task 10). `ShoppingListItemResponse.picnic_status` enum is `"mapped" | "unavailable"` (not "unmapped") consistently in schemas, service, and frontend.
+
+- **v2 changes applied:** The v1 `EanPicnicMap` bridge table is fully excised — no `EanPicnicMap` imports or references remain in Tasks 2, 3, 4, 5, 6, 7, 8, 9, or 10. The `brand` column is removed from `PicnicProduct`. The `ean` column is added to `PicnicProduct`. Matching service is documented as fallback-only.
