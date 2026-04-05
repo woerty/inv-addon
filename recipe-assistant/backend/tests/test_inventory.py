@@ -86,3 +86,147 @@ async def test_remove_last_item_deletes(client: AsyncClient):
 async def test_delete_nonexistent_returns_404(client: AsyncClient):
     response = await client.delete("/api/inventory/9999999999999")
     assert response.status_code == 404
+
+
+# ---- /scan-out endpoint (scanner API contract) ----
+#
+# See docs/superpowers/specs/2026-04-05-scanner-api-design.md for the contract.
+# Response bodies are FLAT (no {"detail": ...} wrapper) so remote terminal
+# clients can branch on the `status` field directly.
+
+from app.config import Settings, get_settings
+from app.main import app as fastapi_app
+
+
+def _override_settings_with_token(token: str):
+    """Install a settings override for the duration of one test."""
+    def _factory():
+        return Settings(scanner_token=token)
+    fastapi_app.dependency_overrides[get_settings] = _factory
+
+
+def _clear_settings_override():
+    fastapi_app.dependency_overrides.pop(get_settings, None)
+
+
+@pytest.mark.asyncio
+async def test_scan_out_decrements_quantity(client: AsyncClient):
+    """200 OK, structured body, deleted=False when qty > 1."""
+    await client.post("/api/inventory/barcode", json={"barcode": "6000000000001"})
+    await client.post("/api/inventory/barcode", json={"barcode": "6000000000001"})
+    await client.post("/api/inventory/barcode", json={"barcode": "6000000000001"})
+
+    response = await client.post("/api/inventory/scan-out", json={"barcode": "6000000000001"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["barcode"] == "6000000000001"
+    assert body["name"] == "Testprodukt"
+    assert body["remaining_quantity"] == 2
+    assert body["deleted"] is False
+
+
+@pytest.mark.asyncio
+async def test_scan_out_deletes_last_unit(client: AsyncClient):
+    """200 OK, deleted=True, item no longer in inventory."""
+    await client.post("/api/inventory/barcode", json={"barcode": "6000000000002"})
+
+    response = await client.post("/api/inventory/scan-out", json={"barcode": "6000000000002"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["remaining_quantity"] == 0
+    assert body["deleted"] is True
+
+    inv = await client.get("/api/inventory/")
+    assert not [i for i in inv.json() if i["barcode"] == "6000000000002"]
+
+
+@pytest.mark.asyncio
+async def test_scan_out_returns_404_for_unknown_barcode(client: AsyncClient):
+    """404 with flat body; no {"detail": ...} wrapper."""
+    response = await client.post("/api/inventory/scan-out", json={"barcode": "9999999999999"})
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["status"] == "not_found"
+    assert body["barcode"] == "9999999999999"
+    assert "error" in body
+    # Make sure we're NOT wrapping in FastAPI's default {"detail": ...}
+    assert "detail" not in body
+
+
+@pytest.mark.asyncio
+async def test_scan_out_requires_token_when_configured(client: AsyncClient):
+    """With scanner_token set, missing header → 401 with flat body."""
+    _override_settings_with_token("supersecret")
+    try:
+        await client.post("/api/inventory/barcode", json={"barcode": "6000000000003"})
+
+        response = await client.post(
+            "/api/inventory/scan-out", json={"barcode": "6000000000003"}
+        )
+
+        assert response.status_code == 401
+        body = response.json()
+        assert body["status"] == "unauthorized"
+        assert "error" in body
+        assert "detail" not in body
+    finally:
+        _clear_settings_override()
+
+
+@pytest.mark.asyncio
+async def test_scan_out_accepts_correct_token(client: AsyncClient):
+    """With scanner_token set, matching header → 200."""
+    _override_settings_with_token("supersecret")
+    try:
+        await client.post("/api/inventory/barcode", json={"barcode": "6000000000004"})
+
+        response = await client.post(
+            "/api/inventory/scan-out",
+            json={"barcode": "6000000000004"},
+            headers={"X-Scanner-Token": "supersecret"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+    finally:
+        _clear_settings_override()
+
+
+@pytest.mark.asyncio
+async def test_scan_out_rejects_wrong_token(client: AsyncClient):
+    """With scanner_token set, wrong header → 401 (not a timing leak via != comparison)."""
+    _override_settings_with_token("supersecret")
+    try:
+        await client.post("/api/inventory/barcode", json={"barcode": "6000000000005"})
+
+        response = await client.post(
+            "/api/inventory/scan-out",
+            json={"barcode": "6000000000005"},
+            headers={"X-Scanner-Token": "wrong"},
+        )
+
+        assert response.status_code == 401
+        assert response.json()["status"] == "unauthorized"
+    finally:
+        _clear_settings_override()
+
+
+@pytest.mark.asyncio
+async def test_scan_out_ignores_token_when_unconfigured(client: AsyncClient):
+    """Empty scanner_token → endpoint accepts requests with or without header."""
+    # No override: conftest uses default Settings() → scanner_token == ""
+    await client.post("/api/inventory/barcode", json={"barcode": "6000000000006"})
+
+    response = await client.post(
+        "/api/inventory/scan-out",
+        json={"barcode": "6000000000006"},
+        headers={"X-Scanner-Token": "arbitrary-value"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"

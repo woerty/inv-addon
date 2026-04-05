@@ -1,6 +1,6 @@
 {
   "name": "Recipe Assistant",
-  "version": "2.4",
+  "version": "2.5",
   "slug": "recipe_assistant",
   "description": "Rezept- und Chat-Assistent mit Claude AI und Inventarverwaltung",
   "url": "https://github.com/woerty/inv-addon",
@@ -11,19 +11,27 @@
   "panel_title": "Recipe Assistant",
   "ingress": true,
   "ingress_port": 8080,
+  "ports": {
+    "8080/tcp": 8099
+  },
+  "ports_description": {
+    "8080/tcp": "Scanner API (LAN-only, used by remote barcode scanner clients)"
+  },
   "map": ["config:rw", "data:rw"],
   "options": {
     "anthropic_api_key": "",
     "openai_api_key": "",
     "picnic_email": "",
     "picnic_password": "",
-    "picnic_country_code": "DE"
+    "picnic_country_code": "DE",
+    "scanner_token": ""
   },
   "schema": {
     "anthropic_api_key": "password",
     "openai_api_key": "password",
     "picnic_email": "str?",
     "picnic_password": "password?",
-    "picnic_country_code": "str?"
+    "picnic_country_code": "str?",
+    "scanner_token": "password?"
   }
 }

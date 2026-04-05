@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hmac
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import Settings, get_settings
 from app.database import get_db
 from app.models.inventory import InventoryItem, StorageLocation
 from app.models.log import InventoryLog
@@ -17,6 +19,7 @@ from app.schemas.inventory import (
     BarcodeRemoveRequest,
     InventoryItemResponse,
     InventoryUpdateRequest,
+    ScanOutRequest,
 )
 from app.services.barcode import lookup_barcode
 
@@ -164,6 +167,75 @@ async def remove_item_by_barcode(
     await db.delete(item)
     await db.commit()
     return {"message": f"Produkt mit Barcode {req.barcode} wurde entfernt."}
+
+
+@router.post("/scan-out")
+async def scan_out(
+    req: ScanOutRequest,
+    x_scanner_token: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+):
+    """Decrement inventory by one for a scanned barcode.
+
+    Contract: docs/superpowers/specs/2026-04-05-scanner-api-design.md.
+    All response bodies are flat JSON (no FastAPI {"detail": ...} wrapper)
+    so remote terminal clients can branch on the `status` field directly.
+    """
+    # Optional shared-secret auth. Only enforced when configured; when
+    # scanner_token is empty the endpoint matches the rest of the inventory
+    # API's LAN-trust posture.
+    if settings.scanner_token:
+        if not x_scanner_token or not hmac.compare_digest(
+            x_scanner_token, settings.scanner_token
+        ):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "status": "unauthorized",
+                    "error": "Invalid or missing X-Scanner-Token",
+                },
+            )
+
+    result = await db.execute(
+        select(InventoryItem).where(InventoryItem.barcode == req.barcode)
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "status": "not_found",
+                "barcode": req.barcode,
+                "error": "Kein Artikel mit diesem Barcode im Inventar",
+            },
+        )
+
+    name = item.name
+    if item.quantity > 1:
+        old_qty = item.quantity
+        item.quantity -= 1
+        new_qty = item.quantity
+        await _log_action(db, req.barcode, "scan-out", f"quantity: {old_qty} → {new_qty}")
+        await db.commit()
+        return {
+            "status": "ok",
+            "barcode": req.barcode,
+            "name": name,
+            "remaining_quantity": new_qty,
+            "deleted": False,
+        }
+
+    await _log_action(db, req.barcode, "scan-out", "removed last item")
+    await db.delete(item)
+    await db.commit()
+    return {
+        "status": "ok",
+        "barcode": req.barcode,
+        "name": name,
+        "remaining_quantity": 0,
+        "deleted": True,
+    }
 
 
 @router.put("/{barcode}")

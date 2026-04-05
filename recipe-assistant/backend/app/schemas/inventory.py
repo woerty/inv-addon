@@ -44,3 +44,7 @@ class InventoryUpdateRequest(BaseModel):
     quantity: int | None = None
     storage_location: str | None = None
     expiration_date: date | None = None
+
+
+class ScanOutRequest(BaseModel):
+    barcode: str

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     picnic_email: str = Field(default="", validation_alias=AliasChoices("PICNIC_MAIL", "PICNIC_EMAIL"))
     picnic_password: str = ""
     picnic_country_code: str = "DE"
+    scanner_token: str = ""
     environment: str = "development"
 
     @classmethod
@@ -47,6 +48,7 @@ class Settings(BaseSettings):
                 picnic_email=options.get("picnic_email", "") or options.get("picnic_mail", ""),
                 picnic_password=options.get("picnic_password", ""),
                 picnic_country_code=options.get("picnic_country_code", "DE"),
+                scanner_token=options.get("scanner_token", ""),
                 environment="production",
             )
         return cls()
