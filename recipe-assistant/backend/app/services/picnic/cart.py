@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,8 @@ from app.services.picnic.catalog import (
     upsert_product,
 )
 from app.services.picnic.client import PicnicClientProtocol
+
+log = logging.getLogger("picnic.cart")
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,9 @@ async def resolve_shopping_list_status(
 
     This may trigger live get_article_by_gtin calls for uncached items. Results
     are cached in picnic_products for future calls.
+
+    The caller owns the commit; this function only flushes so cache upserts
+    are visible within the transaction.
     """
     result = await session.execute(select(ShoppingListItem).order_by(ShoppingListItem.added_at))
     items = result.scalars().all()
@@ -82,7 +89,9 @@ async def resolve_shopping_list_status(
     out: list[ShoppingListItemResponse] = []
     for item in items:
         resolution = await _resolve(session, client, item)
-        status = "mapped" if resolution.picnic_id else "unavailable"
+        status: Literal["mapped", "unavailable"] = (
+            "mapped" if resolution.picnic_id else "unavailable"
+        )
         out.append(
             ShoppingListItemResponse(
                 id=item.id,
@@ -91,7 +100,7 @@ async def resolve_shopping_list_status(
                 picnic_name=resolution.picnic_name,
                 name=item.name,
                 quantity=item.quantity,
-                picnic_status=status,  # type: ignore[arg-type]
+                picnic_status=status,
                 added_at=item.added_at,
             )
         )
@@ -108,7 +117,13 @@ async def sync_shopping_list_to_cart(
 
     Per-item tracking; does NOT roll back on partial failure. Items that succeed
     stay in the Picnic cart; items that failed are reported.
+
+    The caller owns the commit; this function only flushes so cache upserts
+    from any tier-3 lookups are visible within the transaction.
     """
+    # Re-resolves each item (not memoized from a prior resolve_shopping_list_status
+    # call): the shopping list may have been edited between the two requests, and
+    # cached resolutions make tier-2 hits essentially free.
     db_items = (await session.execute(select(ShoppingListItem))).scalars().all()
 
     results: list[CartSyncItemResult] = []
@@ -142,6 +157,13 @@ async def sync_shopping_list_to_cart(
             )
             added_count += 1
         except Exception as e:
+            # Broad catch so one failed item doesn't abort the batch, but log
+            # so programming bugs don't disguise themselves as Picnic errors.
+            log.warning(
+                "add_product failed for picnic_id=%s: %s",
+                resolution.picnic_id,
+                e,
+            )
             reason = str(e) or "http_error"
             if "unavailable" in reason.lower():
                 reason = "product_unavailable"
