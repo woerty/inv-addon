@@ -5,12 +5,14 @@ import {
   updateTrackedProduct,
   deleteTrackedProduct,
   resolveTrackedProductPreview,
+  promoteTrackedProductBarcode,
 } from "../api/client";
 import type {
   TrackedProduct,
   TrackedProductCreate,
   TrackedProductUpdate,
   ResolvePreview,
+  PromoteBarcodeResponse,
 } from "../types";
 
 export function useTrackedProducts() {
@@ -53,7 +55,13 @@ export function useTrackedProducts() {
     await refetch();
   };
 
-  return { items, loading, error, refetch, create, update, remove };
+  const promote = async (synthBarcode: string, newBarcode: string): Promise<PromoteBarcodeResponse> => {
+    const result = await promoteTrackedProductBarcode(synthBarcode, newBarcode);
+    await refetch();
+    return result;
+  };
+
+  return { items, loading, error, refetch, create, update, remove, promote };
 }
 
 export function useResolvePreview() {

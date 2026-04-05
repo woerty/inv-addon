@@ -17,6 +17,7 @@ import type {
   TrackedProductCreate,
   TrackedProductUpdate,
   ResolvePreview,
+  PromoteBarcodeResponse,
 } from "../types";
 
 const BASE = "./api";
@@ -262,3 +263,15 @@ export const resolveTrackedProductPreview = (barcode: string) =>
     method: "POST",
     body: JSON.stringify({ barcode }),
   });
+
+export const promoteTrackedProductBarcode = (
+  synthBarcode: string,
+  newBarcode: string
+) =>
+  request<PromoteBarcodeResponse>(
+    `/tracked-products/${encodeURIComponent(synthBarcode)}/promote-barcode`,
+    {
+      method: "POST",
+      body: JSON.stringify({ new_barcode: newBarcode }),
+    }
+  );

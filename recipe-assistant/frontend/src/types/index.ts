@@ -141,7 +141,9 @@ export interface TrackedProduct {
 }
 
 export interface TrackedProductCreate {
-  barcode: string;
+  barcode?: string | null;
+  picnic_id?: string;
+  name?: string;
   min_quantity: number;
   target_quantity: number;
 }
@@ -158,4 +160,9 @@ export interface ResolvePreview {
   picnic_image_id: string | null;
   picnic_unit_quantity: string | null;
   reason: string | null;
+}
+
+export interface PromoteBarcodeResponse {
+  tracked: TrackedProduct;
+  merged: boolean;
 }
