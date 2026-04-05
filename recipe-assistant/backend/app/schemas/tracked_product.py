@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class TrackedProductCreate(BaseModel):
@@ -23,14 +23,14 @@ class TrackedProductUpdate(BaseModel):
 
 
 class TrackedProductRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = {"from_attributes": True}
 
     barcode: str
     picnic_id: str
     name: str
     picnic_name: str
-    picnic_image_id: str | None
-    picnic_unit_quantity: str | None
+    picnic_image_id: str | None = None
+    picnic_unit_quantity: str | None = None
     min_quantity: int
     target_quantity: int
     current_quantity: int
@@ -45,8 +45,8 @@ class ResolvePreviewRequest(BaseModel):
 
 class ResolvePreviewResponse(BaseModel):
     resolved: bool
-    picnic_id: str | None
-    picnic_name: str | None
-    picnic_image_id: str | None
-    picnic_unit_quantity: str | None
-    reason: str | None  # "cache_hit" | "live_lookup" | "not_in_picnic_catalog"
+    picnic_id: str | None = None
+    picnic_name: str | None = None
+    picnic_image_id: str | None = None
+    picnic_unit_quantity: str | None = None
+    reason: str | None = None  # "cache_hit" | "live_lookup" | "not_in_picnic_catalog"
