@@ -1,4 +1,17 @@
 import { useState } from "react";
+import {
+  Box,
+  Button,
+  IconButton,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
+  Paper,
+  TextField,
+  Typography,
+} from "@mui/material";
+import DeleteIcon from "@mui/icons-material/Delete";
 import { useShoppingList, usePicnicSearch } from "../hooks/usePicnic";
 import type { CartSyncResponse } from "../types";
 
@@ -7,9 +20,6 @@ export default function ShoppingListPage() {
   const { results, search } = usePicnicSearch();
   const [searchQuery, setSearchQuery] = useState("");
   const [syncResult, setSyncResult] = useState<CartSyncResponse | null>(null);
-
-  const statusColor = (status: string) =>
-    status === "mapped" ? "text-green-600" : "text-red-600";
 
   const handleSync = async () => {
     const result = await sync();
@@ -23,92 +33,127 @@ export default function ShoppingListPage() {
   };
 
   return (
-    <div className="p-4 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Einkaufsliste</h1>
+    <Paper sx={{ p: 2, m: 2 }}>
+      <Typography variant="h4" gutterBottom>
+        Einkaufsliste
+      </Typography>
 
-      <div className="border rounded p-3 mb-4">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); search(e.target.value); }}
-            placeholder="Picnic-Produkt suchen..."
-            className="flex-1 border rounded px-2 py-1"
-          />
-        </div>
+      {/* Search card */}
+      <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+        <TextField
+          fullWidth
+          size="small"
+          value={searchQuery}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            search(e.target.value);
+          }}
+          placeholder="Picnic-Produkt suchen..."
+        />
         {results.length > 0 && (
-          <ul className="mt-2 max-h-60 overflow-y-auto">
+          <List dense disablePadding sx={{ mt: 1, maxHeight: 240, overflowY: "auto" }}>
             {results.map((r) => (
-              <li key={r.picnic_id}>
-                <button
-                  onClick={() => handleAddFromSearch(r.picnic_id, r.name)}
-                  className="w-full text-left px-2 py-1 hover:bg-gray-100"
-                >
-                  {r.name} <span className="text-sm text-gray-500">{r.unit_quantity}</span>
-                </button>
-              </li>
+              <ListItemButton
+                key={r.picnic_id}
+                onClick={() => handleAddFromSearch(r.picnic_id, r.name)}
+              >
+                <ListItemText
+                  primary={r.name}
+                  secondary={r.unit_quantity ?? undefined}
+                />
+              </ListItemButton>
             ))}
-          </ul>
+          </List>
         )}
-      </div>
+      </Paper>
 
-      <ul className="space-y-2">
+      {/* Shopping list */}
+      <List disablePadding>
         {items.map((item) => (
-          <li key={item.id} className="flex items-center gap-2 border rounded p-2">
-            <span className={`font-bold ${statusColor(item.picnic_status)}`} title={item.picnic_status === "mapped" ? "bei Picnic verfügbar" : "nicht bei Picnic verfügbar"}>●</span>
-            <div className="flex-1">
-              <div>{item.name}</div>
-              {item.picnic_status === "mapped" && item.picnic_name && item.picnic_name !== item.name && (
-                <div className="text-xs text-gray-500">→ {item.picnic_name}</div>
-              )}
-              {item.picnic_status === "unavailable" && (
-                <div className="text-xs text-red-500">nicht bei Picnic verfügbar</div>
-              )}
-            </div>
-            <input
+          <ListItem
+            key={item.id}
+            sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, mb: 1 }}
+            secondaryAction={
+              <IconButton edge="end" color="error" onClick={() => remove(item.id)}>
+                <DeleteIcon />
+              </IconButton>
+            }
+          >
+            {/* Status dot */}
+            <Box
+              component="span"
+              sx={{
+                color: item.picnic_status === "mapped" ? "success.main" : "error.main",
+                fontSize: "1.5em",
+                mr: 1,
+                lineHeight: 1,
+                flexShrink: 0,
+              }}
+              title={item.picnic_status === "mapped" ? "bei Picnic verfügbar" : "nicht bei Picnic verfügbar"}
+            >
+              ●
+            </Box>
+
+            <ListItemText
+              sx={{ mr: 1 }}
+              primary={item.name}
+              secondary={
+                item.picnic_status === "mapped" && item.picnic_name && item.picnic_name !== item.name
+                  ? `→ ${item.picnic_name}`
+                  : item.picnic_status === "unavailable"
+                  ? (
+                    <Typography component="span" variant="caption" color="error.main">
+                      nicht bei Picnic verfügbar
+                    </Typography>
+                  )
+                  : undefined
+              }
+            />
+
+            <TextField
               type="number"
-              min={1}
+              size="small"
+              sx={{ width: 80, flexShrink: 0 }}
+              inputProps={{ min: 1 }}
               value={item.quantity}
               onChange={(e) => update(item.id, { quantity: Number(e.target.value) })}
-              className="w-16 border rounded px-1 py-0.5"
             />
-            <button
-              onClick={() => remove(item.id)}
-              className="text-red-600 px-2"
-            >
-              ×
-            </button>
-          </li>
+          </ListItem>
         ))}
-      </ul>
+      </List>
 
       {items.length > 0 && (
-        <button
+        <Button
+          variant="contained"
+          color="success"
+          sx={{ mt: 2 }}
           onClick={handleSync}
-          className="mt-4 bg-green-600 text-white px-4 py-2 rounded"
         >
           In Picnic-Cart übertragen
-        </button>
+        </Button>
       )}
 
       {syncResult && (
-        <div className="mt-4 border rounded p-3">
-          <div>Hinzugefügt: {syncResult.added_count}</div>
-          <div>Übersprungen (nicht bei Picnic verfügbar): {syncResult.skipped_count}</div>
-          <div>Fehlgeschlagen: {syncResult.failed_count}</div>
+        <Paper variant="outlined" sx={{ mt: 2, p: 2 }}>
+          <Typography>Hinzugefügt: {syncResult.added_count}</Typography>
+          <Typography>Übersprungen (nicht bei Picnic verfügbar): {syncResult.skipped_count}</Typography>
+          <Typography>Fehlgeschlagen: {syncResult.failed_count}</Typography>
           {syncResult.failed_count > 0 && (
-            <ul className="mt-2 text-sm text-red-600">
+            <List dense disablePadding sx={{ mt: 1 }}>
               {syncResult.results
                 .filter((r) => r.status === "failed")
                 .map((r) => (
-                  <li key={r.shopping_list_id}>
-                    Item #{r.shopping_list_id}: {r.failure_reason}
-                  </li>
+                  <ListItem key={r.shopping_list_id} disablePadding>
+                    <ListItemText
+                      primary={`Item #${r.shopping_list_id}: ${r.failure_reason}`}
+                      primaryTypographyProps={{ color: "error.main", variant: "body2" }}
+                    />
+                  </ListItem>
                 ))}
-            </ul>
+            </List>
           )}
-        </div>
+        </Paper>
       )}
-    </div>
+    </Paper>
   );
 }

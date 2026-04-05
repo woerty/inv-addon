@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Alert, Box, Button, Paper, Typography } from "@mui/material";
 import { usePicnicImport } from "../hooks/usePicnic";
 import { getStorageLocations } from "../api/client";
 import type { ImportDecision } from "../types";
@@ -35,46 +36,50 @@ export default function PicnicImportPage() {
   };
 
   return (
-    <div className="p-4 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Picnic-Bestellungen importieren</h1>
+    <Paper sx={{ p: 2, m: 2 }}>
+      <Typography variant="h4" gutterBottom>
+        Picnic-Bestellungen importieren
+      </Typography>
 
-      <button
-        onClick={fetchImport}
-        disabled={loading}
-        className="bg-blue-600 text-white px-4 py-2 rounded"
-      >
+      <Button variant="contained" onClick={fetchImport} disabled={loading}>
         {loading ? "Lade..." : "Lieferungen abrufen"}
-      </button>
+      </Button>
 
-      {error && <div className="text-red-600 mt-2">{error}</div>}
+      {error && (
+        <Alert severity="error" sx={{ mt: 2 }}>
+          {error}
+        </Alert>
+      )}
 
       {data && data.deliveries.length === 0 && (
-        <div className="mt-4 text-gray-600">Keine neuen Lieferungen.</div>
+        <Typography color="text.secondary" sx={{ mt: 2 }}>
+          Keine neuen Lieferungen.
+        </Typography>
       )}
 
       {data?.deliveries.map((delivery) => (
-        <div key={delivery.delivery_id} className="mt-6">
-          <h2 className="text-lg font-semibold mb-2">
+        <Box key={delivery.delivery_id} sx={{ mt: 3 }}>
+          <Typography variant="h6" gutterBottom>
             Lieferung {delivery.delivery_id} — {delivery.items.length} Artikel
-          </h2>
-          <div className="space-y-3">
-            {delivery.items.map((item) => (
-              <ReviewCard
-                key={item.picnic_id}
-                candidate={item}
-                storageLocations={storageLocations}
-                onChange={handleDecision}
-              />
-            ))}
-          </div>
-          <button
+          </Typography>
+          {delivery.items.map((item) => (
+            <ReviewCard
+              key={item.picnic_id}
+              candidate={item}
+              storageLocations={storageLocations}
+              onChange={handleDecision}
+            />
+          ))}
+          <Button
+            variant="contained"
+            color="success"
+            sx={{ mt: 2 }}
             onClick={() => handleCommit(delivery.delivery_id)}
-            className="mt-4 bg-green-600 text-white px-4 py-2 rounded"
           >
             Bestätigte importieren
-          </button>
-        </div>
+          </Button>
+        </Box>
       ))}
-    </div>
+    </Paper>
   );
 }
