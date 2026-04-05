@@ -1,6 +1,6 @@
 {
   "name": "Recipe Assistant",
-  "version": "2.6",
+  "version": "2.7",
   "slug": "recipe_assistant",
   "description": "Rezept- und Chat-Assistent mit Claude AI und Inventarverwaltung",
   "url": "https://github.com/woerty/inv-addon",
