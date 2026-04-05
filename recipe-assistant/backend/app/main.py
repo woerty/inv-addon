@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
             PicnicProduct,
             PicnicDeliveryImport,
             ShoppingListItem,
+            TrackedProduct,
         )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

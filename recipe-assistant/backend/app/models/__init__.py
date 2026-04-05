@@ -7,6 +7,7 @@ from app.models.picnic import (
     PicnicProduct,
     ShoppingListItem,
 )
+from app.models.tracked_product import TrackedProduct
 
 __all__ = [
     "InventoryItem",
@@ -17,4 +18,5 @@ __all__ = [
     "PicnicProduct",
     "PicnicDeliveryImport",
     "ShoppingListItem",
+    "TrackedProduct",
 ]
