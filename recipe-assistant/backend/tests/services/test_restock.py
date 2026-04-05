@@ -14,9 +14,10 @@ from tests.conftest import TestingSessionLocal
 
 @pytest_asyncio.fixture
 async def db() -> AsyncSession:
+    # Test isolation is handled by the autouse setup_db fixture in
+    # conftest.py, which drops/recreates all tables between tests.
     async with TestingSessionLocal() as session:
         yield session
-        await session.rollback()
 
 
 async def _seed_tracked(
@@ -44,8 +45,8 @@ async def _seed_tracked(
 async def test_no_tracked_rule_returns_none(db: AsyncSession):
     result = await check_and_enqueue(db, barcode="no-such", new_quantity=0)
     assert result is None
-    count = (await db.execute(select(ShoppingListItem))).scalars().all()
-    assert count == []
+    items = (await db.execute(select(ShoppingListItem))).scalars().all()
+    assert items == []
 
 
 @pytest.mark.asyncio

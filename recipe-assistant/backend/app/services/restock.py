@@ -98,7 +98,7 @@ async def check_and_enqueue(
     )
 
     log.info(
-        "restock_auto barcode=%s new_qty=%d needed=%d item_id=%s",
+        "restock_auto barcode=%s new_qty=%d needed=%d item_id=%d",
         barcode,
         new_quantity,
         needed,
