@@ -1,5 +1,6 @@
 import {
   Box,
+  Button,
   Chip,
   IconButton,
   Paper,
@@ -8,16 +9,19 @@ import {
 } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
+import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
 import type { TrackedProduct } from "../../types";
 
 type Props = {
   item: TrackedProduct;
   onEdit: (item: TrackedProduct) => void;
   onDelete: (item: TrackedProduct) => void;
+  onPromote?: (item: TrackedProduct) => void;
 };
 
-const TrackedProductCard = ({ item, onEdit, onDelete }: Props) => {
+const TrackedProductCard = ({ item, onEdit, onDelete, onPromote }: Props) => {
   const badgeColor = item.below_threshold ? "error" : "success";
+  const isSynthetic = item.barcode.startsWith("picnic:");
 
   return (
     <Paper sx={{ p: 2, mb: 1 }}>
@@ -46,6 +50,18 @@ const TrackedProductCard = ({ item, onEdit, onDelete }: Props) => {
           color={badgeColor}
           size="small"
         />
+        {isSynthetic && (
+          <Chip label="Picnic-only" size="small" color="info" />
+        )}
+        {isSynthetic && onPromote && (
+          <Button
+            size="small"
+            startIcon={<QrCodeScannerIcon />}
+            onClick={() => onPromote(item)}
+          >
+            Barcode scannen
+          </Button>
+        )}
         <IconButton onClick={() => onEdit(item)} size="small">
           <EditIcon fontSize="small" />
         </IconButton>

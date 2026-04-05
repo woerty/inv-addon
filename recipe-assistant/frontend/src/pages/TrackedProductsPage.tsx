@@ -6,15 +6,17 @@ import { usePicnicStatus } from "../hooks/usePicnic";
 import { useNotification } from "../components/NotificationProvider";
 import TrackedProductCard from "../components/tracked/TrackedProductCard";
 import TrackedProductForm from "../components/tracked/TrackedProductForm";
+import PromoteBarcodeDialog from "../components/picnic/PromoteBarcodeDialog";
 import type { TrackedProduct } from "../types";
 
 const TrackedProductsPage = () => {
   const { status: picnicStatus, loading: statusLoading } = usePicnicStatus();
-  const { items, loading, error, create, update, remove } = useTrackedProducts();
+  const { items, loading, error, create, update, remove, promote } = useTrackedProducts();
   const { notify } = useNotification();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<TrackedProduct | null>(null);
+  const [promoteTarget, setPromoteTarget] = useState<TrackedProduct | null>(null);
 
   if (statusLoading) return null;
   if (!picnicStatus?.enabled) {
@@ -36,6 +38,17 @@ const TrackedProductsPage = () => {
   const handleEdit = (item: TrackedProduct) => {
     setEditingItem(item);
     setFormOpen(true);
+  };
+
+  const handlePromote = async (synthBarcode: string, newBarcode: string) => {
+    const result = await promote(synthBarcode, newBarcode);
+    notify(
+      result.merged
+        ? "Barcode übernommen (bestehende Regel ersetzt)"
+        : "Barcode übernommen",
+      "success"
+    );
+    return result;
   };
 
   const handleDelete = async (item: TrackedProduct) => {
@@ -75,8 +88,15 @@ const TrackedProductsPage = () => {
           item={item}
           onEdit={handleEdit}
           onDelete={handleDelete}
+          onPromote={setPromoteTarget}
         />
       ))}
+
+      <PromoteBarcodeDialog
+        tracked={promoteTarget}
+        onClose={() => setPromoteTarget(null)}
+        onPromote={handlePromote}
+      />
 
       <TrackedProductForm
         open={formOpen}
