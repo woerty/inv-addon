@@ -50,7 +50,13 @@ const SubscribeDialog = ({ product, onClose, onSubmit }: Props) => {
       });
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Fehler");
+      const msg =
+        e instanceof Error && e.message === "already_tracked"
+          ? "Bereits abonniert"
+          : e instanceof Error
+            ? e.message
+            : "Fehler";
+      setError(msg);
     } finally {
       setSubmitting(false);
     }

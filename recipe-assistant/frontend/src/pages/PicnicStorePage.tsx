@@ -21,7 +21,7 @@ const DEBOUNCE_MS = 400;
 const PicnicStorePage = () => {
   const { status, loading: statusLoading } = usePicnicStatus();
   const { results, loading: searchLoading, search } = usePicnicSearch();
-  const { items: tracked, create, refetch: refetchTracked } = useTrackedProducts();
+  const { items: tracked, create } = useTrackedProducts();
   const { notify } = useNotification();
 
   const [query, setQuery] = useState("");
@@ -60,7 +60,6 @@ const PicnicStorePage = () => {
 
   const handleSubscribe = async (data: TrackedProductCreate) => {
     await create(data);
-    await refetchTracked();
     notify("Abonniert", "success");
   };
 

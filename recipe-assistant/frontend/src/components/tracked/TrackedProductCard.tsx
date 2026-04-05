@@ -29,7 +29,7 @@ const TrackedProductCard = ({ item, onEdit, onDelete, onPromote }: Props) => {
         {item.picnic_image_id && (
           <Box
             component="img"
-            src={`https://storefront-prod.nl.picnicinternational.com/static/images/${item.picnic_image_id}/medium.png`}
+            src={`https://storefront-prod.de.picnicinternational.com/static/images/${item.picnic_image_id}/medium.png`}
             alt=""
             sx={{ width: 56, height: 56, objectFit: "contain" }}
           />
