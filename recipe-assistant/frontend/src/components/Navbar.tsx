@@ -20,6 +20,7 @@ import ChatIcon from "@mui/icons-material/Chat";
 import PeopleIcon from "@mui/icons-material/People";
 import LocalGroceryStoreIcon from "@mui/icons-material/LocalGroceryStore";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
+import LoginIcon from "@mui/icons-material/Login";
 import { useNavigate, useLocation } from "react-router-dom";
 import { usePicnicStatus } from "../hooks/usePicnic";
 
@@ -44,6 +45,10 @@ const Navbar = () => {
       ? [
           { path: "/picnic-import", label: "Picnic-Import", icon: <LocalGroceryStoreIcon /> },
           { path: "/shopping-list", label: "Einkaufsliste", icon: <ShoppingCartIcon /> },
+        ]
+      : status?.needs_login
+      ? [
+          { path: "/picnic-login", label: "Picnic Login", icon: <LoginIcon /> },
         ]
       : []),
   ];

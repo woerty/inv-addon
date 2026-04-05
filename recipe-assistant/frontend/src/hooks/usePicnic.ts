@@ -9,9 +9,13 @@ import {
   deleteShoppingListItem,
   syncShoppingListToCart,
   searchPicnic,
+  startPicnicLogin,
+  sendPicnicLoginCode,
+  verifyPicnicLoginCode,
 } from "../api/client";
 import type {
   PicnicStatus,
+  PicnicLoginChannel,
   ImportFetchResponse,
   ImportDecision,
   ShoppingListItem,
@@ -23,14 +27,88 @@ export function usePicnicStatus() {
   const [status, setStatus] = useState<PicnicStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    getPicnicStatus()
-      .then(setStatus)
-      .catch(() => setStatus({ enabled: false, account: null }))
+  const refetch = useCallback(() => {
+    setLoading(true);
+    return getPicnicStatus()
+      .then((s) => {
+        setStatus(s);
+        return s;
+      })
+      .catch(() => {
+        const fallback: PicnicStatus = {
+          enabled: false,
+          needs_login: false,
+          account: null,
+        };
+        setStatus(fallback);
+        return fallback;
+      })
       .finally(() => setLoading(false));
   }, []);
 
-  return { status, loading };
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
+  return { status, loading, refetch };
+}
+
+export type LoginPhase =
+  | "idle"
+  | "starting"
+  | "awaiting_2fa"
+  | "sending_code"
+  | "awaiting_code"
+  | "verifying"
+  | "success";
+
+export function usePicnicLogin() {
+  const [phase, setPhase] = useState<LoginPhase>("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const start = useCallback(async () => {
+    setError(null);
+    setPhase("starting");
+    try {
+      const r = await startPicnicLogin();
+      setPhase(r.status === "ok" ? "success" : "awaiting_2fa");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Fehler beim Start");
+      setPhase("idle");
+    }
+  }, []);
+
+  const sendCode = useCallback(async (channel: PicnicLoginChannel) => {
+    setError(null);
+    setPhase("sending_code");
+    try {
+      await sendPicnicLoginCode(channel);
+      setPhase("awaiting_code");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Fehler beim Senden des Codes");
+      setPhase("awaiting_2fa");
+    }
+  }, []);
+
+  const verify = useCallback(async (code: string) => {
+    setError(null);
+    setPhase("verifying");
+    try {
+      await verifyPicnicLoginCode(code);
+      setPhase("success");
+    } catch (e) {
+      // Keep the user in awaiting_code so they can retry the code
+      setError(e instanceof Error ? e.message : "Ungültiger Code");
+      setPhase("awaiting_code");
+    }
+  }, []);
+
+  const reset = useCallback(() => {
+    setPhase("idle");
+    setError(null);
+  }, []);
+
+  return { phase, error, start, sendCode, verify, reset };
 }
 
 export function usePicnicImport() {

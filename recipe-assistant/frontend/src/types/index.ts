@@ -38,8 +38,13 @@ export interface Person {
 
 export interface PicnicStatus {
   enabled: boolean;
+  needs_login: boolean;
   account: { first_name: string; last_name: string; email: string } | null;
 }
+
+export type PicnicLoginChannel = "SMS" | "EMAIL";
+
+export type PicnicLoginStartStatus = "ok" | "awaiting_2fa";
 
 export interface MatchSuggestion {
   inventory_barcode: string;

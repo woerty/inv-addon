@@ -5,6 +5,8 @@ import type {
   ChatMessage,
   Person,
   PicnicStatus,
+  PicnicLoginStartStatus,
+  PicnicLoginChannel,
   ImportFetchResponse,
   ImportDecision,
   ImportCommitResponse,
@@ -30,7 +32,17 @@ async function request<T>(
   }
   if (!response.ok) {
     const error = await response.json().catch(() => null);
-    const detail = error?.detail || error?.message || `HTTP ${response.status}: ${response.statusText}`;
+    const rawDetail = error?.detail ?? error?.message;
+    let detail: string;
+    if (typeof rawDetail === "string") {
+      detail = rawDetail;
+    } else if (rawDetail && typeof rawDetail === "object") {
+      // FastAPI HTTPException(detail={...}) returns a structured object.
+      // Prefer a known "error" token, otherwise fall back to JSON.
+      detail = rawDetail.error || rawDetail.message || JSON.stringify(rawDetail);
+    } else {
+      detail = `HTTP ${response.status}: ${response.statusText}`;
+    }
     throw new Error(detail);
   }
   return response.json();
@@ -200,3 +212,18 @@ export const deleteShoppingListItem = (id: number) =>
 
 export const syncShoppingListToCart = () =>
   request<CartSyncResponse>("/picnic/shopping-list/sync", { method: "POST" });
+
+export const startPicnicLogin = () =>
+  request<{ status: PicnicLoginStartStatus }>("/picnic/login/start", { method: "POST" });
+
+export const sendPicnicLoginCode = (channel: PicnicLoginChannel) =>
+  request<{ status: "sent" }>("/picnic/login/send-code", {
+    method: "POST",
+    body: JSON.stringify({ channel }),
+  });
+
+export const verifyPicnicLoginCode = (code: string) =>
+  request<{ status: "ok" }>("/picnic/login/verify", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
