@@ -23,6 +23,8 @@ from app.schemas.inventory import (
     ScanOutRequest,
 )
 from app.services.barcode import lookup_barcode
+from app.services.restock import check_and_enqueue
+from app.models.tracked_product import TrackedProduct
 
 router = APIRouter()
 
@@ -42,6 +44,43 @@ async def _resolve_storage_location(db: AsyncSession, name: str | None) -> int |
     db.add(new_loc)
     await db.flush()
     return new_loc.id
+
+
+async def _apply_decrement(
+    db: AsyncSession,
+    item: InventoryItem,
+    new_quantity: int,
+    *,
+    action: str,
+    log_details: str,
+) -> bool:
+    """Apply a quantity decrement plus tracking-aware rules.
+
+    - Sets item.quantity = new_quantity.
+    - If new_quantity == 0 and the product has a TrackedProduct rule,
+      the row is kept (zombie); otherwise it is deleted.
+    - Runs restock.check_and_enqueue, which may upsert a ShoppingListItem
+      in the same transaction.
+    - Writes an InventoryLog entry with the given action and details.
+
+    Returns True if the inventory row was deleted, False if it was kept.
+    Caller must still commit the transaction.
+    """
+    tracked = (
+        await db.execute(
+            select(TrackedProduct).where(TrackedProduct.barcode == item.barcode)
+        )
+    ).scalar_one_or_none()
+
+    if new_quantity <= 0 and tracked is None:
+        await _log_action(db, item.barcode, action, log_details)
+        await db.delete(item)
+        return True
+
+    item.quantity = new_quantity
+    await _log_action(db, item.barcode, action, log_details)
+    await check_and_enqueue(db, barcode=item.barcode, new_quantity=new_quantity)
+    return False
 
 
 @router.get("/", response_model=list[InventoryItemResponse])
@@ -157,17 +196,23 @@ async def remove_item_by_barcode(
     if not item:
         raise HTTPException(status_code=404, detail=f"Kein Artikel mit Barcode {req.barcode} gefunden")
 
-    if item.quantity > 1:
-        old_qty = item.quantity
-        item.quantity -= 1
-        await _log_action(db, req.barcode, "remove", f"quantity: {old_qty} → {item.quantity}")
-        await db.commit()
-        return {"message": f"Produkt um 1 reduziert. Verbleibend: {item.quantity}"}
-
-    await _log_action(db, req.barcode, "delete", "removed last item")
-    await db.delete(item)
+    old_qty = item.quantity
+    new_qty = old_qty - 1
+    deleted = await _apply_decrement(
+        db,
+        item,
+        new_qty,
+        action="remove" if new_qty > 0 else "delete",
+        log_details=(
+            f"quantity: {old_qty} → {new_qty}"
+            if new_qty > 0
+            else "removed last item"
+        ),
+    )
     await db.commit()
-    return {"message": f"Produkt mit Barcode {req.barcode} wurde entfernt."}
+    if deleted:
+        return {"message": f"Produkt mit Barcode {req.barcode} wurde entfernt."}
+    return {"message": f"Produkt um 1 reduziert. Verbleibend: {new_qty}"}
 
 
 def _check_scanner_token(
@@ -224,29 +269,26 @@ async def scan_out(
         )
 
     name = item.name
-    if item.quantity > 1:
-        old_qty = item.quantity
-        item.quantity -= 1
-        new_qty = item.quantity
-        await _log_action(db, req.barcode, "scan-out", f"quantity: {old_qty} → {new_qty}")
-        await db.commit()
-        return {
-            "status": "ok",
-            "barcode": req.barcode,
-            "name": name,
-            "remaining_quantity": new_qty,
-            "deleted": False,
-        }
-
-    await _log_action(db, req.barcode, "scan-out", "removed last item")
-    await db.delete(item)
+    old_qty = item.quantity
+    new_qty = old_qty - 1
+    deleted = await _apply_decrement(
+        db,
+        item,
+        new_qty,
+        action="scan-out",
+        log_details=(
+            f"quantity: {old_qty} → {new_qty}"
+            if new_qty > 0
+            else "removed last item"
+        ),
+    )
     await db.commit()
     return {
         "status": "ok",
         "barcode": req.barcode,
         "name": name,
-        "remaining_quantity": 0,
-        "deleted": True,
+        "remaining_quantity": max(new_qty, 0),
+        "deleted": deleted,
     }
 
 
@@ -363,14 +405,27 @@ async def update_item(
         raise HTTPException(status_code=404, detail=f"Kein Artikel mit Barcode {barcode} gefunden")
 
     if req.quantity is not None:
-        if req.quantity == 0:
-            await _log_action(db, barcode, "delete", "quantity set to 0")
-            await db.delete(item)
-            await db.commit()
-            return {"message": f"Artikel mit Barcode {barcode} wurde gelöscht."}
         old_qty = item.quantity
-        item.quantity = req.quantity
-        await _log_action(db, barcode, "update", f"quantity: {old_qty} → {req.quantity}")
+        if req.quantity < old_qty:
+            # Decrement path: helper enforces delete-iff-not-tracked and
+            # fires the restock check.
+            deleted = await _apply_decrement(
+                db,
+                item,
+                req.quantity,
+                action="update" if req.quantity > 0 else "delete",
+                log_details=f"quantity: {old_qty} → {req.quantity}",
+            )
+            if deleted:
+                await db.commit()
+                return {"message": f"Artikel mit Barcode {barcode} wurde gelöscht."}
+        else:
+            # Non-decrement (increment or no-op on quantity): no restock
+            # check, no delete rule — simple assignment.
+            item.quantity = req.quantity
+            await _log_action(
+                db, barcode, "update", f"quantity: {old_qty} → {req.quantity}"
+            )
 
     if req.storage_location is not None:
         item.storage_location_id = await _resolve_storage_location(db, req.storage_location)
