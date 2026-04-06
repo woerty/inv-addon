@@ -25,9 +25,19 @@ from app.schemas.inventory import (
     ScanOutRequest,
 )
 from app.services.barcode import lookup_barcode
+from app.services.picnic.catalog import PicnicProductData, upsert_product
+from app.services.picnic.client import PicnicClientProtocol, get_picnic_client
 from app.services.restock import check_and_enqueue
 
 router = APIRouter()
+
+
+async def _opt_picnic_client() -> PicnicClientProtocol | None:
+    """Return the Picnic client if configured, None otherwise."""
+    try:
+        return get_picnic_client()
+    except Exception:
+        return None
 
 
 async def _log_action(db: AsyncSession, barcode: str, action: str, details: str | None = None) -> None:
@@ -185,8 +195,14 @@ async def relookup_all_unknown(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/backfill-images")
-async def backfill_images(db: AsyncSession = Depends(get_db)):
-    """Fetch images for all inventory items that don't have one yet."""
+async def backfill_images(
+    db: AsyncSession = Depends(get_db),
+    picnic: PicnicClientProtocol | None = Depends(_opt_picnic_client),
+):
+    """Fetch images for all inventory items that don't have one yet.
+
+    Priority: Picnic GTIN lookup (caches into picnic_products) > OFF/UPCitemdb.
+    """
     try:
         result = await db.execute(
             select(InventoryItem).where(InventoryItem.image_url.is_(None))
@@ -202,6 +218,27 @@ async def backfill_images(db: AsyncSession = Depends(get_db)):
     updated = 0
     for item in items:
         try:
+            # 1) Try Picnic GTIN lookup (highest priority).
+            if picnic is not None:
+                article = await picnic.get_article_by_gtin(item.barcode)
+                if article and article.get("image_id"):
+                    # Cache in picnic_products so GET /inventory enrichment works.
+                    await upsert_product(
+                        db,
+                        PicnicProductData(
+                            picnic_id=article["id"],
+                            ean=item.barcode,
+                            name=article.get("name", item.name),
+                            unit_quantity=article.get("unit_quantity"),
+                            image_id=article.get("image_id"),
+                            last_price_cents=article.get("display_price"),
+                        ),
+                    )
+                    item.image_url = f"https://storefront-prod.de.picnicinternational.com/static/images/{article['image_id']}/small.png"
+                    updated += 1
+                    continue
+
+            # 2) Fallback: OFF / UPCitemdb / etc.
             product = await lookup_barcode(item.barcode)
             if product.get("image_url"):
                 item.image_url = product["image_url"]
