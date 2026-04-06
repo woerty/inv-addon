@@ -187,19 +187,27 @@ async def relookup_all_unknown(db: AsyncSession = Depends(get_db)):
 @router.post("/backfill-images")
 async def backfill_images(db: AsyncSession = Depends(get_db)):
     """Fetch images for all inventory items that don't have one yet."""
-    result = await db.execute(
-        select(InventoryItem).where(InventoryItem.image_url.is_(None))
-    )
+    try:
+        result = await db.execute(
+            select(InventoryItem).where(InventoryItem.image_url.is_(None))
+        )
+    except Exception:
+        # Column may not exist yet if migration 006 hasn't been applied.
+        return {"message": "Bitte Addon neu starten um die Datenbank zu aktualisieren.", "updated": 0}
+
     items = result.scalars().all()
     if not items:
         return {"message": "Alle Produkte haben bereits Bilder.", "updated": 0}
 
     updated = 0
     for item in items:
-        product = await lookup_barcode(item.barcode)
-        if product.get("image_url"):
-            item.image_url = product["image_url"]
-            updated += 1
+        try:
+            product = await lookup_barcode(item.barcode)
+            if product.get("image_url"):
+                item.image_url = product["image_url"]
+                updated += 1
+        except Exception:
+            continue  # Skip failed lookups, don't crash the batch.
 
     await db.commit()
     return {"message": f"{updated} von {len(items)} Bildern nachgeschlagen.", "updated": updated}
