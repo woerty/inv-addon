@@ -280,10 +280,10 @@ async def update_tracked(
     new_target = (
         req.target_quantity if req.target_quantity is not None else tp.target_quantity
     )
-    if new_target <= new_min:
+    if new_target < new_min:
         raise HTTPException(
             status_code=422,
-            detail={"error": "target_must_exceed_min"},
+            detail={"error": "target_must_be_gte_min"},
         )
 
     tp.min_quantity = new_min

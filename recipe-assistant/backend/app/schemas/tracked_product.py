@@ -13,9 +13,9 @@ class TrackedProductCreate(BaseModel):
     target_quantity: int = Field(gt=0)
 
     @model_validator(mode="after")
-    def _target_gt_min(self) -> "TrackedProductCreate":
-        if self.target_quantity <= self.min_quantity:
-            raise ValueError("target_quantity must be greater than min_quantity")
+    def _target_gte_min(self) -> "TrackedProductCreate":
+        if self.target_quantity < self.min_quantity:
+            raise ValueError("target_quantity must be >= min_quantity")
         return self
 
     @model_validator(mode="after")

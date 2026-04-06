@@ -37,7 +37,7 @@ class TrackedProduct(Base):
     __table_args__ = (
         CheckConstraint("min_quantity >= 0", name="ck_tracked_min_nonneg"),
         CheckConstraint(
-            "target_quantity > min_quantity",
-            name="ck_tracked_target_gt_min",
+            "target_quantity >= min_quantity",
+            name="ck_tracked_target_gte_min",
         ),
     )

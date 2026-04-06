@@ -10,13 +10,14 @@ def test_create_accepts_valid_values():
     assert body.target_quantity == 4
 
 
-def test_create_rejects_target_equal_to_min():
-    with pytest.raises(ValidationError, match="greater than min_quantity"):
-        TrackedProductCreate(barcode="123", min_quantity=2, target_quantity=2)
+def test_create_accepts_target_equal_to_min():
+    body = TrackedProductCreate(barcode="123", min_quantity=2, target_quantity=2)
+    assert body.min_quantity == 2
+    assert body.target_quantity == 2
 
 
 def test_create_rejects_target_less_than_min():
-    with pytest.raises(ValidationError, match="greater than min_quantity"):
+    with pytest.raises(ValidationError, match=">= min_quantity"):
         TrackedProductCreate(barcode="123", min_quantity=5, target_quantity=3)
 
 
