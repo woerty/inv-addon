@@ -16,13 +16,14 @@ import {
 } from "@mui/material";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import FileUploadIcon from "@mui/icons-material/FileUpload";
+import ImageSearchIcon from "@mui/icons-material/ImageSearch";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import LocalGroceryStoreIcon from "@mui/icons-material/LocalGroceryStore";
 import { IconButton } from "@mui/material";
 import { useInventory } from "../hooks/useInventory";
 import { useNotification } from "../components/NotificationProvider";
-import { exportData, importData, relookupBarcode, relookupAllUnknown, addShoppingListItem } from "../api/client";
+import { exportData, importData, relookupBarcode, relookupAllUnknown, backfillImages, addShoppingListItem } from "../api/client";
 import { usePicnicStatus } from "../hooks/usePicnic";
 import { useTrackedProducts } from "../hooks/useTrackedProducts";
 import InventoryRestockButton from "../components/tracked/InventoryRestockButton";
@@ -99,6 +100,16 @@ const InventoryPage = () => {
   const handleRelookupAll = async () => {
     try {
       const result = await relookupAllUnknown();
+      notify(result.message, result.updated > 0 ? "success" : "info");
+      if (result.updated > 0) refetch();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Fehler", "error");
+    }
+  };
+
+  const handleBackfillImages = async () => {
+    try {
+      const result = await backfillImages();
       notify(result.message, result.updated > 0 ? "success" : "info");
       if (result.updated > 0) refetch();
     } catch (e) {
@@ -223,6 +234,16 @@ const InventoryPage = () => {
             onClick={handleRelookupAll}
           >
             Unbekannte nachschlagen
+          </Button>
+        )}
+        {items.some((i) => !i.image_url) && (
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<ImageSearchIcon />}
+            onClick={handleBackfillImages}
+          >
+            Bilder nachschlagen
           </Button>
         )}
         {picnicStatus?.enabled && (

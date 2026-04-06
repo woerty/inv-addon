@@ -99,6 +99,9 @@ export const relookupBarcode = (barcode: string) =>
 export const relookupAllUnknown = () =>
   request<{ message: string; updated: number }>("/inventory/relookup-all", { method: "POST" });
 
+export const backfillImages = () =>
+  request<{ message: string; updated: number }>("/inventory/backfill-images", { method: "POST" });
+
 export const exportData = async (): Promise<Blob> => {
   const response = await fetch(`${BASE}/inventory/export`);
   if (!response.ok) throw new Error("Export fehlgeschlagen");
