@@ -277,10 +277,10 @@ const InventoryPage = () => {
               >
                 <TableCell>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    {item.image_id && (
+                    {item.image_url && (
                       <Box
                         component="img"
-                        src={`https://storefront-prod.de.picnicinternational.com/static/images/${item.image_id}/small.png`}
+                        src={item.image_url}
                         alt=""
                         sx={{ width: 36, height: 36, objectFit: "contain", flexShrink: 0 }}
                       />

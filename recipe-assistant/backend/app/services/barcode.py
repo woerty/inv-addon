@@ -3,10 +3,10 @@ from __future__ import annotations
 import httpx
 
 TIMEOUT_SECONDS = 5.0
-FALLBACK = {"name": "Unbekanntes Produkt", "category": "Unbekannt"}
+FALLBACK: dict[str, str | None] = {"name": "Unbekanntes Produkt", "category": "Unbekannt", "image_url": None}
 
 
-async def _lookup_openfoodfacts(barcode: str, client: httpx.AsyncClient) -> dict[str, str] | None:
+async def _lookup_openfoodfacts(barcode: str, client: httpx.AsyncClient) -> dict[str, str | None] | None:
     """OpenFoodFacts - largest open food database."""
     try:
         response = await client.get(
@@ -22,12 +22,13 @@ async def _lookup_openfoodfacts(barcode: str, client: httpx.AsyncClient) -> dict
         return {
             "name": name,
             "category": product.get("categories") or "Unbekannt",
+            "image_url": product.get("image_front_url") or product.get("image_url"),
         }
     except (httpx.TimeoutException, httpx.HTTPError):
         return None
 
 
-async def _lookup_openbeautyfacts(barcode: str, client: httpx.AsyncClient) -> dict[str, str] | None:
+async def _lookup_openbeautyfacts(barcode: str, client: httpx.AsyncClient) -> dict[str, str | None] | None:
     """OpenBeautyFacts - for non-food products (cosmetics, cleaning, etc.)."""
     try:
         response = await client.get(
@@ -43,12 +44,13 @@ async def _lookup_openbeautyfacts(barcode: str, client: httpx.AsyncClient) -> di
         return {
             "name": name,
             "category": product.get("categories") or "Unbekannt",
+            "image_url": product.get("image_front_url") or product.get("image_url"),
         }
     except (httpx.TimeoutException, httpx.HTTPError):
         return None
 
 
-async def _lookup_openpetfoodfacts(barcode: str, client: httpx.AsyncClient) -> dict[str, str] | None:
+async def _lookup_openpetfoodfacts(barcode: str, client: httpx.AsyncClient) -> dict[str, str | None] | None:
     """OpenPetFoodFacts - for pet food products."""
     try:
         response = await client.get(
@@ -64,12 +66,13 @@ async def _lookup_openpetfoodfacts(barcode: str, client: httpx.AsyncClient) -> d
         return {
             "name": name,
             "category": product.get("categories") or "Unbekannt",
+            "image_url": product.get("image_front_url") or product.get("image_url"),
         }
     except (httpx.TimeoutException, httpx.HTTPError):
         return None
 
 
-async def _lookup_upcitemdb(barcode: str, client: httpx.AsyncClient) -> dict[str, str] | None:
+async def _lookup_upcitemdb(barcode: str, client: httpx.AsyncClient) -> dict[str, str | None] | None:
     """UPCitemdb - general product database (free tier: 100 req/day)."""
     try:
         response = await client.get(
@@ -83,9 +86,11 @@ async def _lookup_upcitemdb(barcode: str, client: httpx.AsyncClient) -> dict[str
         name = item.get("title")
         if not name:
             return None
+        images = item.get("images", [])
         return {
             "name": name,
             "category": item.get("category") or "Unbekannt",
+            "image_url": images[0] if images else None,
         }
     except (httpx.TimeoutException, httpx.HTTPError):
         return None
@@ -100,11 +105,11 @@ PROVIDERS = [
 ]
 
 
-async def lookup_barcode(barcode: str) -> dict[str, str]:
+async def lookup_barcode(barcode: str) -> dict[str, str | None]:
     """Look up a barcode across multiple providers. Returns first match."""
     async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
         for _name, provider in PROVIDERS:
             result = await provider(barcode, client)
             if result:
                 return result
-    return FALLBACK
+    return dict(FALLBACK)

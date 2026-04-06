@@ -110,8 +110,9 @@ async def get_inventory(
     result = await db.execute(query)
     items = result.scalars().all()
 
-    # Enrich with Picnic product images (left-join by barcode=ean).
+    # Enrich with Picnic product images (highest priority).
     barcodes = [i.barcode for i in items]
+    picnic_image_map: dict[str, str] = {}
     if barcodes:
         pp_rows = (
             await db.execute(
@@ -120,9 +121,17 @@ async def get_inventory(
                 .where(PicnicProduct.image_id.isnot(None))
             )
         ).all()
-        image_map = {row.ean: row.image_id for row in pp_rows}
-        for item in items:
-            item.image_id = image_map.get(item.barcode)  # type: ignore[attr-defined]
+        picnic_image_map = {
+            row.ean: f"https://storefront-prod.de.picnicinternational.com/static/images/{row.image_id}/small.png"
+            for row in pp_rows
+        }
+
+    # Build final image_url: Picnic CDN > stored image_url from barcode lookup.
+    for item in items:
+        picnic_url = picnic_image_map.get(item.barcode)
+        if picnic_url:
+            item.image_url = picnic_url  # Picnic wins
+        # else: item.image_url is already set from the DB column (OFF, etc.)
 
     return items
 
@@ -144,6 +153,8 @@ async def relookup_barcode(barcode: str, db: AsyncSession = Depends(get_db)):
     old_name = item.name
     item.name = product["name"]
     item.category = product["category"]
+    if product.get("image_url") and not item.image_url:
+        item.image_url = product["image_url"]
     await _log_action(db, barcode, "update", f"re-lookup: {old_name} → {product['name']}")
     await db.commit()
     return {"message": f'Aktualisiert: "{product["name"]}"', "updated": True}
@@ -165,6 +176,8 @@ async def relookup_all_unknown(db: AsyncSession = Depends(get_db)):
         if product["name"] != "Unbekanntes Produkt":
             item.name = product["name"]
             item.category = product["category"]
+            if product.get("image_url") and not item.image_url:
+                item.image_url = product["image_url"]
             updated += 1
 
     await db.commit()
@@ -195,6 +208,7 @@ async def add_item_by_barcode(
         name=product["name"],
         quantity=1,
         category=product["category"],
+        image_url=product.get("image_url"),
         storage_location_id=location_id,
         expiration_date=req.expiration_date,
     )
@@ -392,6 +406,7 @@ async def scan_in(
         name=product["name"],
         quantity=1,
         category=product["category"],
+        image_url=product.get("image_url"),
         storage_location_id=requested_location.id if requested_location else None,
     )
     db.add(item)

@@ -20,7 +20,8 @@ import type {
   PromoteBarcodeResponse,
 } from "../types";
 
-const BASE = "./api";
+const basePath = new URL(document.baseURI).pathname.replace(/\/$/, "");
+const BASE = `${basePath}/api`;
 
 async function request<T>(
   path: string,

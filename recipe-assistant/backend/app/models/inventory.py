@@ -28,6 +28,7 @@ class InventoryItem(Base):
     storage_location_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("storage_locations.id", ondelete="SET NULL"), nullable=True
     )
+    image_url: Mapped[str | None] = mapped_column(String, nullable=True)
     expiration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     added_date: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
