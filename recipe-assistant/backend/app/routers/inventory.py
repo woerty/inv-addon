@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 from datetime import date
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -194,35 +195,53 @@ async def relookup_all_unknown(db: AsyncSession = Depends(get_db)):
     return {"message": f"{updated} von {len(items)} Produkten aktualisiert.", "updated": updated}
 
 
+async def _picnic_search_image(
+    picnic: PicnicClientProtocol,
+    picnic_id: str,
+    name: str,
+) -> dict[str, Any] | None:
+    """Search Picnic by name, find the item matching picnic_id, return its details."""
+    try:
+        search_results = await picnic.search(name[:40])
+    except Exception:
+        return None
+    for group in search_results:
+        for sr in group.get("items", []):
+            if sr.get("id") == picnic_id:
+                return sr
+    return None
+
+
 @router.post("/backfill-images")
 async def backfill_images(
     db: AsyncSession = Depends(get_db),
     picnic: PicnicClientProtocol | None = Depends(_opt_picnic_client),
 ):
-    """Fetch images for all inventory items that don't have one yet.
+    """Fetch images for inventory items + tracked products without images.
 
-    Priority: Picnic GTIN lookup (caches into picnic_products) > OFF/UPCitemdb.
+    Priority: Picnic GTIN lookup → Picnic search → OFF/UPCitemdb.
+    Also backfills picnic_products.image_id for tracked products.
     """
     try:
         result = await db.execute(
             select(InventoryItem).where(InventoryItem.image_url.is_(None))
         )
     except Exception:
-        # Column may not exist yet if migration 006 hasn't been applied.
         return {"message": "Bitte Addon neu starten um die Datenbank zu aktualisieren.", "updated": 0}
 
     items = result.scalars().all()
-    if not items:
-        return {"message": "Alle Produkte haben bereits Bilder.", "updated": 0}
 
-    updated = 0
-    diag = {"gtin_hit": 0, "gtin_miss": 0, "gtin_err": 0,
-            "search_match": 0, "search_no_match": 0, "search_err": 0,
-            "off_hit": 0, "off_miss": 0, "total": len(items)}
+    diag: dict[str, int] = {
+        "inv_total": len(items), "inv_updated": 0,
+        "gtin_hit": 0, "gtin_miss": 0, "gtin_err": 0,
+        "search_match": 0, "search_no_match": 0,
+        "off_hit": 0, "off_miss": 0,
+        "tracked_total": 0, "tracked_updated": 0,
+    }
 
+    # --- Pass 1: Inventory items without image_url ---
     for item in items:
         try:
-            # 1) Try Picnic: GTIN lookup → search by name → extract image_id.
             if picnic is not None:
                 try:
                     article = await picnic.get_article_by_gtin(item.barcode)
@@ -232,64 +251,67 @@ async def backfill_images(
 
                 if article and article.get("id"):
                     diag["gtin_hit"] += 1
-                    picnic_id = article["id"]
-                    picnic_name = article.get("name", item.name)
-                    image_id = None
-                    unit_quantity = None
-                    price_cents = None
+                    sr = await _picnic_search_image(picnic, article["id"], article.get("name", item.name))
+                    image_id = sr.get("image_id") if sr else None
 
-                    # Search by name to find image_id (GTIN response lacks it).
-                    try:
-                        search_results = await picnic.search(picnic_name[:40])
-                        for group in search_results:
-                            for sr in group.get("items", []):
-                                if sr.get("id") == picnic_id:
-                                    image_id = sr.get("image_id")
-                                    unit_quantity = sr.get("unit_quantity")
-                                    price_cents = sr.get("display_price")
-                                    break
-                            if image_id:
-                                break
-                        if image_id:
-                            diag["search_match"] += 1
-                        else:
-                            diag["search_no_match"] += 1
-                    except Exception:
-                        diag["search_err"] += 1
+                    if image_id:
+                        diag["search_match"] += 1
+                    else:
+                        diag["search_no_match"] += 1
 
-                    await upsert_product(
-                        db,
-                        PicnicProductData(
-                            picnic_id=picnic_id,
-                            ean=item.barcode,
-                            name=picnic_name,
-                            unit_quantity=unit_quantity,
-                            image_id=image_id,
-                            last_price_cents=price_cents,
-                        ),
-                    )
+                    await upsert_product(db, PicnicProductData(
+                        picnic_id=article["id"], ean=item.barcode,
+                        name=article.get("name", item.name),
+                        unit_quantity=sr.get("unit_quantity") if sr else None,
+                        image_id=image_id,
+                        last_price_cents=sr.get("display_price") if sr else None,
+                    ))
                     if image_id:
                         item.image_url = f"https://storefront-prod.de.picnicinternational.com/static/images/{image_id}/small.png"
-                        updated += 1
+                        diag["inv_updated"] += 1
                         continue
                 else:
                     diag["gtin_miss"] += 1
 
-            # 2) Fallback: OFF / UPCitemdb / etc.
             product = await lookup_barcode(item.barcode)
             if product.get("image_url"):
                 item.image_url = product["image_url"]
                 diag["off_hit"] += 1
-                updated += 1
+                diag["inv_updated"] += 1
             else:
                 diag["off_miss"] += 1
         except Exception:
             continue
 
+    # --- Pass 2: picnic_products rows without image_id (covers tracked products) ---
+    if picnic is not None:
+        pp_rows = (
+            await db.execute(
+                select(PicnicProduct)
+                .where(PicnicProduct.image_id.is_(None))
+                .where(PicnicProduct.picnic_id.isnot(None))
+            )
+        ).scalars().all()
+        diag["tracked_total"] = len(pp_rows)
+
+        for pp in pp_rows:
+            try:
+                sr = await _picnic_search_image(picnic, pp.picnic_id, pp.name)
+                if sr and sr.get("image_id"):
+                    pp.image_id = sr["image_id"]
+                    if sr.get("unit_quantity"):
+                        pp.unit_quantity = sr["unit_quantity"]
+                    if sr.get("display_price"):
+                        pp.last_price_cents = sr["display_price"]
+                    diag["tracked_updated"] += 1
+            except Exception:
+                continue
+
     await db.commit()
+    total_updated = diag["inv_updated"] + diag["tracked_updated"]
     return {
-        "message": f"{updated} von {len(items)} Bildern nachgeschlagen.",
-        "updated": updated,
+        "message": f"{total_updated} Bilder aktualisiert (Inventar: {diag['inv_updated']}, Picnic-Produkte: {diag['tracked_updated']}).",
+        "updated": total_updated,
         "diagnostics": diag,
     }
 
