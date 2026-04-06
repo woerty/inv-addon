@@ -223,25 +223,24 @@ async def backfill_images(
     Also backfills picnic_products.image_id for tracked products.
     """
     try:
-        result = await db.execute(
-            select(InventoryItem).where(InventoryItem.image_url.is_(None))
-        )
+        result = await db.execute(select(InventoryItem))
     except Exception:
         return {"message": "Bitte Addon neu starten um die Datenbank zu aktualisieren.", "updated": 0}
 
-    items = result.scalars().all()
+    all_items = result.scalars().all()
 
     diag: dict[str, int] = {
-        "inv_total": len(items), "inv_updated": 0,
+        "inv_total": len(all_items), "inv_updated": 0,
         "gtin_hit": 0, "gtin_miss": 0, "gtin_err": 0,
         "search_match": 0, "search_no_match": 0,
         "off_hit": 0, "off_miss": 0,
         "tracked_total": 0, "tracked_updated": 0,
     }
 
-    # --- Pass 1: Inventory items without image_url ---
-    for item in items:
+    # --- Pass 1: All inventory items — try Picnic first, OFF only as fallback ---
+    for item in all_items:
         try:
+            # Always try Picnic (even if item already has an image — Picnic wins).
             if picnic is not None:
                 try:
                     article = await picnic.get_article_by_gtin(item.barcode)
@@ -267,19 +266,23 @@ async def backfill_images(
                         last_price_cents=sr.get("display_price") if sr else None,
                     ))
                     if image_id:
-                        item.image_url = f"https://storefront-prod.de.picnicinternational.com/static/images/{image_id}/small.png"
-                        diag["inv_updated"] += 1
+                        picnic_url = f"https://storefront-prod.de.picnicinternational.com/static/images/{image_id}/small.png"
+                        if item.image_url != picnic_url:
+                            item.image_url = picnic_url
+                            diag["inv_updated"] += 1
                         continue
                 else:
                     diag["gtin_miss"] += 1
 
-            product = await lookup_barcode(item.barcode)
-            if product.get("image_url"):
-                item.image_url = product["image_url"]
-                diag["off_hit"] += 1
-                diag["inv_updated"] += 1
-            else:
-                diag["off_miss"] += 1
+            # OFF fallback — only if no image yet.
+            if not item.image_url:
+                product = await lookup_barcode(item.barcode)
+                if product.get("image_url"):
+                    item.image_url = product["image_url"]
+                    diag["off_hit"] += 1
+                    diag["inv_updated"] += 1
+                else:
+                    diag["off_miss"] += 1
         except Exception:
             continue
 
