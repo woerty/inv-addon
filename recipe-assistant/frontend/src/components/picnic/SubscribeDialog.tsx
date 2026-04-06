@@ -31,7 +31,7 @@ const SubscribeDialog = ({ product, onClose, onSubmit }: Props) => {
     }
   }, [product]);
 
-  const targetInvalid = targetQty <= minQty;
+  const targetInvalid = targetQty < minQty;
   const canSubmit = useMemo(
     () => !submitting && minQty >= 0 && targetQty > 0 && !targetInvalid,
     [submitting, minQty, targetQty, targetInvalid]
@@ -83,7 +83,7 @@ const SubscribeDialog = ({ product, onClose, onSubmit }: Props) => {
             inputProps={{ min: 1 }}
             helperText={
               targetInvalid
-                ? "Ziel-Menge muss größer als die Mindestmenge sein"
+                ? "Ziel-Menge darf nicht kleiner als die Mindestmenge sein"
                 : "Auf diese Menge wird bei Unterschreitung aufgefüllt"
             }
             error={targetInvalid}

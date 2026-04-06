@@ -78,7 +78,7 @@ const TrackedProductForm = ({
     return () => clearTimeout(handle);
   }, [barcode, mode, resolve, clear]);
 
-  const targetInvalid = targetQty <= minQty;
+  const targetInvalid = targetQty < minQty;
   const canSubmit = useMemo(() => {
     if (submitting) return false;
     if (minQty < 0) return false;
@@ -182,7 +182,7 @@ const TrackedProductForm = ({
             inputProps={{ min: 1 }}
             helperText={
               targetInvalid
-                ? "Ziel-Menge muss größer als die Mindestmenge sein"
+                ? "Ziel-Menge darf nicht kleiner als die Mindestmenge sein"
                 : "Auf diese Menge wird bei Unterschreitung aufgefüllt"
             }
             error={targetInvalid}
