@@ -218,25 +218,49 @@ async def backfill_images(
     updated = 0
     for item in items:
         try:
-            # 1) Try Picnic GTIN lookup (highest priority).
+            # 1) Try Picnic: GTIN lookup → search by name → extract image_id.
+            #    get_article_by_gtin only returns {id, name}, no image_id.
+            #    So we follow up with a search to find the image.
             if picnic is not None:
                 article = await picnic.get_article_by_gtin(item.barcode)
-                if article and article.get("image_id"):
-                    # Cache in picnic_products so GET /inventory enrichment works.
+                if article and article.get("id"):
+                    picnic_id = article["id"]
+                    picnic_name = article.get("name", item.name)
+                    image_id = None
+                    unit_quantity = None
+                    price_cents = None
+
+                    # Search by name to find image_id (GTIN response lacks it).
+                    try:
+                        search_results = await picnic.search(picnic_name[:40])
+                        for group in search_results:
+                            for sr in group.get("items", []):
+                                if sr.get("id") == picnic_id:
+                                    image_id = sr.get("image_id")
+                                    unit_quantity = sr.get("unit_quantity")
+                                    price_cents = sr.get("display_price")
+                                    break
+                            if image_id:
+                                break
+                    except Exception:
+                        pass  # Search failed, proceed with what we have.
+
+                    # Cache in picnic_products (with or without image).
                     await upsert_product(
                         db,
                         PicnicProductData(
-                            picnic_id=article["id"],
+                            picnic_id=picnic_id,
                             ean=item.barcode,
-                            name=article.get("name", item.name),
-                            unit_quantity=article.get("unit_quantity"),
-                            image_id=article.get("image_id"),
-                            last_price_cents=article.get("display_price"),
+                            name=picnic_name,
+                            unit_quantity=unit_quantity,
+                            image_id=image_id,
+                            last_price_cents=price_cents,
                         ),
                     )
-                    item.image_url = f"https://storefront-prod.de.picnicinternational.com/static/images/{article['image_id']}/small.png"
-                    updated += 1
-                    continue
+                    if image_id:
+                        item.image_url = f"https://storefront-prod.de.picnicinternational.com/static/images/{image_id}/small.png"
+                        updated += 1
+                        continue
 
             # 2) Fallback: OFF / UPCitemdb / etc.
             product = await lookup_barcode(item.barcode)
