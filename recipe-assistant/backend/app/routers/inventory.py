@@ -216,14 +216,22 @@ async def backfill_images(
         return {"message": "Alle Produkte haben bereits Bilder.", "updated": 0}
 
     updated = 0
+    diag = {"gtin_hit": 0, "gtin_miss": 0, "gtin_err": 0,
+            "search_match": 0, "search_no_match": 0, "search_err": 0,
+            "off_hit": 0, "off_miss": 0, "total": len(items)}
+
     for item in items:
         try:
             # 1) Try Picnic: GTIN lookup → search by name → extract image_id.
-            #    get_article_by_gtin only returns {id, name}, no image_id.
-            #    So we follow up with a search to find the image.
             if picnic is not None:
-                article = await picnic.get_article_by_gtin(item.barcode)
+                try:
+                    article = await picnic.get_article_by_gtin(item.barcode)
+                except Exception:
+                    diag["gtin_err"] += 1
+                    article = None
+
                 if article and article.get("id"):
+                    diag["gtin_hit"] += 1
                     picnic_id = article["id"]
                     picnic_name = article.get("name", item.name)
                     image_id = None
@@ -242,10 +250,13 @@ async def backfill_images(
                                     break
                             if image_id:
                                 break
+                        if image_id:
+                            diag["search_match"] += 1
+                        else:
+                            diag["search_no_match"] += 1
                     except Exception:
-                        pass  # Search failed, proceed with what we have.
+                        diag["search_err"] += 1
 
-                    # Cache in picnic_products (with or without image).
                     await upsert_product(
                         db,
                         PicnicProductData(
@@ -261,17 +272,26 @@ async def backfill_images(
                         item.image_url = f"https://storefront-prod.de.picnicinternational.com/static/images/{image_id}/small.png"
                         updated += 1
                         continue
+                else:
+                    diag["gtin_miss"] += 1
 
             # 2) Fallback: OFF / UPCitemdb / etc.
             product = await lookup_barcode(item.barcode)
             if product.get("image_url"):
                 item.image_url = product["image_url"]
+                diag["off_hit"] += 1
                 updated += 1
+            else:
+                diag["off_miss"] += 1
         except Exception:
-            continue  # Skip failed lookups, don't crash the batch.
+            continue
 
     await db.commit()
-    return {"message": f"{updated} von {len(items)} Bildern nachgeschlagen.", "updated": updated}
+    return {
+        "message": f"{updated} von {len(items)} Bildern nachgeschlagen.",
+        "updated": updated,
+        "diagnostics": diag,
+    }
 
 
 @router.post("/barcode", status_code=201)

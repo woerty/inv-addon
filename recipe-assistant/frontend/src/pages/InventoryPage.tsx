@@ -110,7 +110,11 @@ const InventoryPage = () => {
   const handleBackfillImages = async () => {
     try {
       const result = await backfillImages();
-      notify(result.message, result.updated > 0 ? "success" : "info");
+      const d = result.diagnostics;
+      const detail = d
+        ? ` (Picnic GTIN: ${d.gtin_hit ?? 0}/${d.total ?? 0}, Search-Match: ${d.search_match ?? 0}, OFF: ${d.off_hit ?? 0}, Fehler: ${(d.gtin_err ?? 0) + (d.search_err ?? 0)})`
+        : "";
+      notify(result.message + detail, result.updated > 0 ? "success" : "info");
       if (result.updated > 0) refetch();
     } catch (e) {
       notify(e instanceof Error ? e.message : "Fehler", "error");

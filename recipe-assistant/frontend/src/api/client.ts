@@ -100,7 +100,7 @@ export const relookupAllUnknown = () =>
   request<{ message: string; updated: number }>("/inventory/relookup-all", { method: "POST" });
 
 export const backfillImages = () =>
-  request<{ message: string; updated: number }>("/inventory/backfill-images", { method: "POST" });
+  request<{ message: string; updated: number; diagnostics?: Record<string, number> }>("/inventory/backfill-images", { method: "POST" });
 
 export const exportData = async (): Promise<Blob> => {
   const response = await fetch(`${BASE}/inventory/export`);
