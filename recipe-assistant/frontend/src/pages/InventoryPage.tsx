@@ -276,12 +276,24 @@ const InventoryPage = () => {
                 }}
               >
                 <TableCell>
-                  {item.name}
-                  {item.name === "Unbekanntes Produkt" && (
-                    <IconButton size="small" onClick={() => handleRelookup(item.barcode)} title="Nochmal nachschlagen">
-                      <RefreshIcon fontSize="small" />
-                    </IconButton>
-                  )}
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    {item.image_id && (
+                      <Box
+                        component="img"
+                        src={`https://storefront-prod.de.picnicinternational.com/static/images/${item.image_id}/small.png`}
+                        alt=""
+                        sx={{ width: 36, height: 36, objectFit: "contain", flexShrink: 0 }}
+                      />
+                    )}
+                    <span>
+                      {item.name}
+                      {item.name === "Unbekanntes Produkt" && (
+                        <IconButton size="small" onClick={() => handleRelookup(item.barcode)} title="Nochmal nachschlagen">
+                          <RefreshIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </span>
+                  </Box>
                 </TableCell>
                 <TableCell>{item.barcode}</TableCell>
                 <TableCell>

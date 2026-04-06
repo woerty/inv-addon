@@ -24,6 +24,7 @@ class InventoryItemResponse(BaseModel):
     category: str
     storage_location: StorageLocationResponse | None = None
     expiration_date: date | None = None
+    image_id: str | None = None
     added_date: datetime
     updated_date: datetime
 

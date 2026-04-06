@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models.inventory import InventoryItem, StorageLocation
 from app.models.log import InventoryLog
 from app.models.person import Person
+from app.models.picnic import PicnicProduct
 from app.models.tracked_product import TrackedProduct
 from app.schemas.inventory import (
     BarcodeAddRequest,
@@ -107,7 +108,23 @@ async def get_inventory(
         query = query.order_by(col.desc() if order == "desc" else col.asc())
 
     result = await db.execute(query)
-    return result.scalars().all()
+    items = result.scalars().all()
+
+    # Enrich with Picnic product images (left-join by barcode=ean).
+    barcodes = [i.barcode for i in items]
+    if barcodes:
+        pp_rows = (
+            await db.execute(
+                select(PicnicProduct.ean, PicnicProduct.image_id)
+                .where(PicnicProduct.ean.in_(barcodes))
+                .where(PicnicProduct.image_id.isnot(None))
+            )
+        ).all()
+        image_map = {row.ean: row.image_id for row in pp_rows}
+        for item in items:
+            item.image_id = image_map.get(item.barcode)  # type: ignore[attr-defined]
+
+    return items
 
 
 @router.post("/relookup/{barcode}")

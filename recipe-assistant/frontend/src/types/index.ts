@@ -11,6 +11,7 @@ export interface InventoryItem {
   category: string;
   storage_location: StorageLocation | null;
   expiration_date: string | null;
+  image_id: string | null;
   added_date: string;
   updated_date: string;
 }
