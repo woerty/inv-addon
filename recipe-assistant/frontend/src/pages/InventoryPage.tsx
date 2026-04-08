@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Box,
   Button,
+  Chip,
   Paper,
   Table,
   TableBody,
@@ -24,6 +25,7 @@ import { useInventory } from "../hooks/useInventory";
 import { useNotification } from "../components/NotificationProvider";
 import { exportData, importData, relookupBarcode, relookupAllUnknown, backfillImages } from "../api/client";
 import { usePicnicStatus } from "../hooks/usePicnic";
+import { usePicnicPendingOrders } from "../hooks/usePicnicOrders";
 import { useTrackedProducts } from "../hooks/useTrackedProducts";
 import InventoryRestockButton from "../components/tracked/InventoryRestockButton";
 import TrackedProductForm from "../components/tracked/TrackedProductForm";
@@ -47,6 +49,18 @@ const InventoryPage = () => {
     }
     return map;
   }, [trackedProducts.items]);
+
+  const { quantityMap: orderQuantities } = usePicnicPendingOrders();
+  const barcodeToOrderQty = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const tp of trackedProducts.items) {
+      const qty = orderQuantities[tp.picnic_id];
+      if (tp.picnic_id && qty) {
+        map[tp.barcode] = qty;
+      }
+    }
+    return map;
+  }, [trackedProducts.items, orderQuantities]);
 
   const [trackedFormOpen, setTrackedFormOpen] = useState(false);
   const [trackedFormBarcode, setTrackedFormBarcode] = useState("");
@@ -328,14 +342,22 @@ const InventoryPage = () => {
                     value={editFields[item.id]?.quantity ?? item.quantity}
                     onChange={(e) => handleFieldChange(item.id, "quantity", e.target.value)}
                   />
+                  {(barcodeToOrderQty[item.barcode] ?? 0) > 0 && (
+                    <Chip
+                      label={`${barcodeToOrderQty[item.barcode]} in Bestellung`}
+                      size="small"
+                      color="warning"
+                      sx={{ mt: 0.5 }}
+                    />
+                  )}
                   {item.quantity === 0 && trackedByBarcode.has(item.barcode) && (
                     <Typography
                       variant="caption"
-                      color="error"
+                      color={(barcodeToOrderQty[item.barcode] ?? 0) > 0 ? "warning.main" : "error"}
                       display="block"
                       sx={{ mt: 0.5 }}
                     >
-                      leer, nachbestellt
+                      {(barcodeToOrderQty[item.barcode] ?? 0) > 0 ? "in Bestellung" : "leer, nachbestellen"}
                     </Typography>
                   )}
                 </TableCell>
