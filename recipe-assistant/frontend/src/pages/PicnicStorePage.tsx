@@ -1,115 +1,80 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  Box,
-  CircularProgress,
-  Container,
-  Grid,
-  TextField,
-  Typography,
-} from "@mui/material";
-import { usePicnicSearch, usePicnicStatus } from "../hooks/usePicnic";
+import { useCallback, useMemo, useState } from "react";
+import { Alert, Badge, Box, CircularProgress, Container, Tab, Tabs } from "@mui/material";
+import { usePicnicStatus } from "../hooks/usePicnic";
+import { usePicnicCart } from "../hooks/usePicnicCart";
+import { usePicnicPendingOrders } from "../hooks/usePicnicOrders";
 import { useTrackedProducts } from "../hooks/useTrackedProducts";
-import { useNotification } from "../components/NotificationProvider";
-import { addShoppingListItem } from "../api/client";
-import StoreResultCard from "../components/picnic/StoreResultCard";
+import StoreTab from "../components/picnic/store/StoreTab";
+import CartTab from "../components/picnic/cart/CartTab";
+import OrdersTab from "../components/picnic/orders/OrdersTab";
+import SubscriptionsTab from "../components/picnic/subscriptions/SubscriptionsTab";
+import ProductDetailModal from "../components/picnic/store/ProductDetailModal";
 import SubscribeDialog from "../components/picnic/SubscribeDialog";
 import type { PicnicSearchResult, TrackedProductCreate } from "../types";
 
-const DEBOUNCE_MS = 400;
-
-const PicnicStorePage = () => {
+export default function PicnicStorePage() {
   const { status, loading: statusLoading } = usePicnicStatus();
-  const { results, loading: searchLoading, search } = usePicnicSearch();
-  const { items: tracked, create } = useTrackedProducts();
-  const { notify } = useNotification();
+  const { cart, loading: cartLoading, add: cartAdd, remove: cartRemove, clear: cartClear } = usePicnicCart();
+  const { orders, quantityMap: orderQuantities, loading: ordersLoading } = usePicnicPendingOrders();
+  const { items: tracked, create: createTracked } = useTrackedProducts();
 
-  const [query, setQuery] = useState("");
+  const [tab, setTab] = useState(0);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [subscribeTarget, setSubscribeTarget] = useState<PicnicSearchResult | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const subscribedPicnicIds = useMemo(
-    () => new Set(tracked.map((t) => t.picnic_id)),
-    [tracked]
-  );
+  const cartQuantities = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const item of cart?.items ?? []) map[item.picnic_id] = item.quantity;
+    return map;
+  }, [cart]);
 
-  const handleQueryChange = useCallback(
-    (value: string) => {
-      setQuery(value);
-      clearTimeout(timerRef.current);
-      if (value.trim().length < 2) return;
-      timerRef.current = setTimeout(() => search(value.trim()), DEBOUNCE_MS);
-    },
-    [search]
-  );
+  const inventoryQuantities = useMemo<Record<string, number>>(() => ({}), []);
 
-  useEffect(() => () => clearTimeout(timerRef.current), []);
+  const subscribedIds = useMemo(() => new Set(tracked.map(t => t.picnic_id)), [tracked]);
 
-  const handleAddToList = async (r: PicnicSearchResult) => {
-    try {
-      await addShoppingListItem({
-        picnic_id: r.picnic_id,
-        name: r.name,
-        quantity: 1,
-      });
-      notify("Zur Einkaufsliste hinzugefügt", "success");
-    } catch (e) {
-      notify(e instanceof Error ? e.message : "Fehler", "error");
-    }
-  };
+  const handleCartAdd = useCallback(async (picnicId: string, count = 1) => {
+    await cartAdd(picnicId, count);
+  }, [cartAdd]);
 
-  const handleSubscribe = async (data: TrackedProductCreate) => {
-    await create(data);
-    notify("Abonniert", "success");
-  };
+  const handleCartRemove = useCallback(async (picnicId: string, count = 1) => {
+    await cartRemove(picnicId, count);
+  }, [cartRemove]);
 
-  if (statusLoading) return null;
-  if (!status?.enabled) {
-    return (
-      <Container sx={{ mt: 4 }}>
-        <Alert severity="info">
-          Picnic Store benötigt die Picnic-Integration. Bitte zuerst Picnic
-          einrichten.
-        </Alert>
-      </Container>
-    );
-  }
+  const handleCartClear = useCallback(async () => {
+    await cartClear();
+  }, [cartClear]);
+
+  const handleSubscribe = useCallback(async (data: TrackedProductCreate) => {
+    await createTracked(data);
+    setSubscribeTarget(null);
+  }, [createTracked]);
+
+  if (statusLoading) return <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>;
+  if (!status?.enabled) return <Container maxWidth="sm" sx={{ mt: 4 }}><Alert severity="info">Picnic ist nicht konfiguriert.</Alert></Container>;
 
   return (
-    <Container sx={{ mt: 4 }}>
-      <Typography variant="h4" gutterBottom>
-        Picnic Store
-      </Typography>
-      <TextField
-        fullWidth
-        placeholder="Picnic durchsuchen..."
-        value={query}
-        onChange={(e) => handleQueryChange(e.target.value)}
-        sx={{ mb: 3 }}
+    <Container maxWidth="lg" sx={{ mt: 2, mb: 4 }}>
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
+        <Tab label="Store" />
+        <Tab label={<Badge badgeContent={cart?.total_items ?? 0} color="primary" max={99}><Box sx={{ px: 1 }}>Warenkorb</Box></Badge>} />
+        <Tab label="Bestellungen" />
+        <Tab label="Abos" />
+      </Tabs>
+
+      {tab === 0 && <StoreTab cartQuantities={cartQuantities} orderQuantities={orderQuantities} inventoryQuantities={inventoryQuantities} subscribedIds={subscribedIds} onProductClick={setDetailId} />}
+      {tab === 1 && <CartTab cart={cart} loading={cartLoading} onAdd={handleCartAdd} onRemove={handleCartRemove} onClear={handleCartClear} onProductClick={setDetailId} />}
+      {tab === 2 && <OrdersTab orders={orders} loading={ordersLoading} />}
+      {tab === 3 && <SubscriptionsTab orderQuantities={orderQuantities} />}
+
+      <ProductDetailModal
+        picnicId={detailId}
+        onClose={() => setDetailId(null)}
+        onCartAdd={handleCartAdd}
+        onCartRemove={handleCartRemove}
+        onSubscribe={(picnicId, name) =>
+          setSubscribeTarget({ picnic_id: picnicId, name, image_id: null, unit_quantity: null, price_cents: null })
+        }
       />
-
-      {searchLoading && (
-        <Box display="flex" justifyContent="center" my={4}>
-          <CircularProgress />
-        </Box>
-      )}
-
-      {!searchLoading && results.length === 0 && query.trim().length >= 2 && (
-        <Typography color="text.secondary">Keine Ergebnisse.</Typography>
-      )}
-
-      <Grid container spacing={2}>
-        {results.map((r) => (
-          <Grid item xs={6} sm={4} md={3} key={r.picnic_id}>
-            <StoreResultCard
-              result={r}
-              alreadySubscribed={subscribedPicnicIds.has(r.picnic_id)}
-              onAddToList={handleAddToList}
-              onSubscribe={setSubscribeTarget}
-            />
-          </Grid>
-        ))}
-      </Grid>
 
       <SubscribeDialog
         product={subscribeTarget}
@@ -118,6 +83,4 @@ const PicnicStorePage = () => {
       />
     </Container>
   );
-};
-
-export default PicnicStorePage;
+}
