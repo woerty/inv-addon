@@ -23,6 +23,10 @@ class PicnicClientProtocol(Protocol):
     async def get_cart(self) -> dict[str, Any]: ...
     async def add_product(self, picnic_id: str, count: int = 1) -> dict[str, Any]: ...
     async def get_user(self) -> dict[str, Any]: ...
+    async def remove_product(self, picnic_id: str, count: int = 1) -> dict[str, Any]: ...
+    async def clear_cart(self) -> dict[str, Any]: ...
+    async def get_categories(self, depth: int = 0) -> list[dict[str, Any]]: ...
+    async def get_article(self, article_id: str) -> dict[str, Any]: ...
 
 
 class PicnicNotConfigured(Exception):
@@ -203,6 +207,18 @@ class PicnicClient:
 
     async def get_user(self) -> dict[str, Any]:
         return await self._call("get_user")
+
+    async def remove_product(self, picnic_id: str, count: int = 1) -> dict[str, Any]:
+        return await self._call("remove_product", picnic_id, count=count)
+
+    async def clear_cart(self) -> dict[str, Any]:
+        return await self._call("clear_cart")
+
+    async def get_categories(self, depth: int = 0) -> list[dict[str, Any]]:
+        return await self._call("get_categories", depth=depth)
+
+    async def get_article(self, article_id: str) -> dict[str, Any]:
+        return await self._call("get_article", article_id)
 
 
 # --- FastAPI dependency ---

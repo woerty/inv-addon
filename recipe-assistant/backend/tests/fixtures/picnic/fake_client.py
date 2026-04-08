@@ -30,6 +30,10 @@ class FakePicnicClient:
         self.added_products: list[tuple[str, int]] = []
         self.gtin_calls: list[str] = []  # track calls to get_article_by_gtin
         self.raise_on_add: dict[str, str] = {}  # picnic_id -> reason
+        self.removed_products: list[tuple[str, int]] = []
+        self.cart_items: dict[str, int] = {}
+        self.categories: list[dict[str, Any]] = []
+        self.articles: dict[str, dict[str, Any]] = {}
 
     async def search(self, query: str) -> list[dict[str, Any]]:
         return self.search_results.get(query.lower(), [])
@@ -55,6 +59,28 @@ class FakePicnicClient:
 
     async def get_user(self) -> dict[str, Any]:
         return self.user
+
+    async def remove_product(self, picnic_id: str, count: int = 1) -> dict[str, Any]:
+        self.removed_products.append((picnic_id, count))
+        current = self.cart_items.get(picnic_id, 0)
+        new_qty = max(0, current - count)
+        if new_qty == 0:
+            self.cart_items.pop(picnic_id, None)
+        else:
+            self.cart_items[picnic_id] = new_qty
+        return {"ok": True}
+
+    async def clear_cart(self) -> dict[str, Any]:
+        self.cart_items.clear()
+        return {"ok": True}
+
+    async def get_categories(self, depth: int = 0) -> list[dict[str, Any]]:
+        return self.categories
+
+    async def get_article(self, article_id: str) -> dict[str, Any]:
+        if article_id in self.articles:
+            return self.articles[article_id]
+        raise Exception(f"Article {article_id} not found")
 
 
 # Static conformance check: ensures FakePicnicClient stays in sync with
