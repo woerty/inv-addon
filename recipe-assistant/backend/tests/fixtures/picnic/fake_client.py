@@ -49,6 +49,12 @@ class FakePicnicClient:
         return self.delivery_details[delivery_id]
 
     async def get_cart(self) -> dict[str, Any]:
+        if self.cart_items:
+            items = [
+                {"id": picnic_id, "name": picnic_id, "quantity": qty}
+                for picnic_id, qty in self.cart_items.items()
+            ]
+            return {"items": items, "total_price": 0}
         return self.cart
 
     async def add_product(self, picnic_id: str, count: int = 1) -> dict[str, Any]:

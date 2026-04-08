@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.database import Base
 from app.models.picnic import PicnicProduct, ShoppingListItem
 from app.services.picnic.cart import (
+    parse_cart_response,
     resolve_shopping_list_status,
     sync_shopping_list_to_cart,
 )
@@ -112,3 +113,20 @@ async def test_sync_reports_failures_per_item(session, client):
     failed = next(r for r in response.results if r.status == "failed")
     assert failed.picnic_id == "s200"
     assert "unavailable" in (failed.failure_reason or "").lower()
+
+
+async def test_parse_cart_response_builds_items():
+    client = FakePicnicClient()
+    client.cart_items = {"s100": 2, "s200": 1}
+    result = await parse_cart_response(client)
+    assert result.total_items == 3
+    assert len(result.items) == 2
+    ids = {item.picnic_id for item in result.items}
+    assert ids == {"s100", "s200"}
+
+
+async def test_parse_cart_response_empty():
+    client = FakePicnicClient()
+    result = await parse_cart_response(client)
+    assert result.total_items == 0
+    assert result.items == []
