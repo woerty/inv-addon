@@ -26,11 +26,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models.picnic import PicnicProduct, ShoppingListItem
+from app.models.picnic import PicnicProduct
 from app.schemas.picnic import (
     CartModifyRequest,
     CartResponse,
-    CartSyncResponse,
     CategoriesResponse,
     Category,
     CategoryItem,
@@ -48,16 +47,11 @@ from app.schemas.picnic import (
     PicnicSearchResult,
     PicnicStatusResponse,
     ProductDetailResponse,
-    ShoppingListAddRequest,
-    ShoppingListItemResponse,
-    ShoppingListUpdateRequest,
     SubCategory,
 )
 from app.services.picnic.cart import (
     _parse_cart_quantities,
     parse_cart_response,
-    resolve_shopping_list_status,
-    sync_shopping_list_to_cart,
 )
 from app.services.picnic.catalog import PicnicProductData, get_product, upsert_product
 from app.services.picnic.orders import parse_pending_orders
@@ -277,95 +271,6 @@ async def search(
             )
     await db.commit()
     return PicnicSearchResponse(results=results)
-
-
-@router.get("/shopping-list", response_model=list[ShoppingListItemResponse])
-async def get_shopping_list(
-    client: PicnicClientProtocol = Depends(get_picnic_client),
-    db: AsyncSession = Depends(get_db),
-):
-    _require_enabled()
-    try:
-        items = await resolve_shopping_list_status(db, client)
-        await db.commit()
-        return items
-    except PicnicReauthRequired:
-        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
-
-
-@router.post("/shopping-list", response_model=ShoppingListItemResponse, status_code=201)
-async def add_shopping_list_item(
-    req: ShoppingListAddRequest,
-    client: PicnicClientProtocol = Depends(get_picnic_client),
-    db: AsyncSession = Depends(get_db),
-):
-    _require_enabled()
-    item = ShoppingListItem(
-        inventory_barcode=req.inventory_barcode,
-        picnic_id=req.picnic_id,
-        name=req.name,
-        quantity=req.quantity,
-    )
-    db.add(item)
-    await db.commit()
-    await db.refresh(item)
-    try:
-        items = await resolve_shopping_list_status(db, client)
-        await db.commit()
-    except PicnicReauthRequired:
-        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
-    return next(i for i in items if i.id == item.id)
-
-
-@router.patch("/shopping-list/{item_id}", response_model=ShoppingListItemResponse)
-async def update_shopping_list_item(
-    item_id: int,
-    req: ShoppingListUpdateRequest,
-    client: PicnicClientProtocol = Depends(get_picnic_client),
-    db: AsyncSession = Depends(get_db),
-):
-    _require_enabled()
-    result = await db.execute(select(ShoppingListItem).where(ShoppingListItem.id == item_id))
-    item = result.scalar_one_or_none()
-    if not item:
-        raise HTTPException(status_code=404, detail="not found")
-    if req.quantity is not None:
-        item.quantity = req.quantity
-    if req.picnic_id is not None:
-        item.picnic_id = req.picnic_id
-    await db.commit()
-    try:
-        items = await resolve_shopping_list_status(db, client)
-        await db.commit()
-    except PicnicReauthRequired:
-        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
-    return next(i for i in items if i.id == item_id)
-
-
-@router.delete("/shopping-list/{item_id}")
-async def delete_shopping_list_item(item_id: int, db: AsyncSession = Depends(get_db)):
-    _require_enabled()
-    result = await db.execute(select(ShoppingListItem).where(ShoppingListItem.id == item_id))
-    item = result.scalar_one_or_none()
-    if not item:
-        raise HTTPException(status_code=404, detail="not found")
-    await db.delete(item)
-    await db.commit()
-    return {"message": "deleted"}
-
-
-@router.post("/shopping-list/sync", response_model=CartSyncResponse)
-async def sync_cart(
-    client: PicnicClientProtocol = Depends(get_picnic_client),
-    db: AsyncSession = Depends(get_db),
-):
-    _require_enabled()
-    try:
-        response = await sync_shopping_list_to_cart(db, client)
-        await db.commit()
-        return response
-    except PicnicReauthRequired:
-        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
 
 
 @router.get("/cache", response_model=list[PicnicProductCacheEntry])

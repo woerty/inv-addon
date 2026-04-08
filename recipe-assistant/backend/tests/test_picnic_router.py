@@ -64,28 +64,6 @@ async def test_import_commit_then_refetch_is_empty(client: AsyncClient):
     assert refetch.json()["deliveries"] == []
 
 
-@pytest.mark.asyncio
-async def test_shopping_list_crud_and_sync(client: AsyncClient, override_picnic_client):
-    add = await client.post(
-        "/api/picnic/shopping-list",
-        json={"name": "Milch", "quantity": 2, "picnic_id": "s100"},
-    )
-    assert add.status_code == 201
-    item_id = add.json()["id"]
-    assert add.json()["picnic_status"] == "mapped"
-
-    listing = await client.get("/api/picnic/shopping-list")
-    assert len(listing.json()) == 1
-
-    sync = await client.post("/api/picnic/shopping-list/sync")
-    assert sync.status_code == 200
-    assert sync.json()["added_count"] == 1
-    assert ("s100", 2) in override_picnic_client.added_products
-
-    delete = await client.delete(f"/api/picnic/shopping-list/{item_id}")
-    assert delete.status_code == 200
-
-
 async def test_get_cart(client, override_picnic_client):
     fake = override_picnic_client
     fake.cart_items = {"s100": 2}

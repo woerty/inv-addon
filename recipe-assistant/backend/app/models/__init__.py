@@ -5,7 +5,6 @@ from app.models.person import Person
 from app.models.picnic import (
     PicnicDeliveryImport,
     PicnicProduct,
-    ShoppingListItem,
 )
 from app.models.tracked_product import TrackedProduct
 
@@ -17,6 +16,5 @@ __all__ = [
     "Person",
     "PicnicProduct",
     "PicnicDeliveryImport",
-    "ShoppingListItem",
     "TrackedProduct",
 ]

@@ -43,15 +43,3 @@ class PicnicDeliveryImport(Base):
     item_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
-class ShoppingListItem(Base):
-    """In-app shopping list, flushed to Picnic cart on demand."""
-    __tablename__ = "shopping_list"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    inventory_barcode: Mapped[str | None] = mapped_column(String, nullable=True)
-    picnic_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    added_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=func.now()
-    )

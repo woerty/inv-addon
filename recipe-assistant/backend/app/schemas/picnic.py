@@ -92,47 +92,6 @@ class ImportCommitResponse(BaseModel):
     promoted: int  # synthetic -> real EAN promotions
 
 
-# --- Shopping list ---
-
-class ShoppingListItemResponse(BaseModel):
-    id: int
-    inventory_barcode: str | None
-    picnic_id: str | None
-    picnic_name: str | None  # resolved via GTIN lookup or cache
-    name: str
-    quantity: int
-    picnic_status: Literal["mapped", "unavailable"]  # v2: no yellow state
-    added_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class ShoppingListAddRequest(BaseModel):
-    inventory_barcode: str | None = None
-    picnic_id: str | None = None
-    name: str
-    quantity: int = 1
-
-
-class ShoppingListUpdateRequest(BaseModel):
-    quantity: int | None = None
-    picnic_id: str | None = None
-
-
-class CartSyncItemResult(BaseModel):
-    shopping_list_id: int
-    picnic_id: str | None
-    status: Literal["added", "skipped_unmapped", "failed"]
-    failure_reason: str | None = None
-
-
-class CartSyncResponse(BaseModel):
-    results: list[CartSyncItemResult]
-    added_count: int
-    failed_count: int
-    skipped_count: int
-
-
 # --- Search (fallback for unavailable items) ---
 
 class PicnicSearchResult(BaseModel):

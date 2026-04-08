@@ -7,7 +7,6 @@ from app.models.inventory import InventoryItem
 from app.models.picnic import (
     PicnicDeliveryImport,
     PicnicProduct,
-    ShoppingListItem,
 )
 from app.services.picnic.import_flow import (
     fetch_import_candidates,
