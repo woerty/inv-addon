@@ -343,6 +343,17 @@ async def get_pending_orders(
     return await parse_pending_orders(client)
 
 
+@router.get("/orders/recent-products")
+async def get_recent_products(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    from app.services.picnic.orders import get_recently_ordered_products
+
+    products = await get_recently_ordered_products(client)
+    return {"products": products}
+
+
 # ── Categories ────────────────────────────────────────────────────────────────
 
 @router.get("/categories", response_model=CategoriesResponse)

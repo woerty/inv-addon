@@ -59,3 +59,34 @@ async def parse_pending_orders(
         )
 
     return PendingOrdersResponse(orders=orders, quantity_map=dict(quantity_map))
+
+
+async def get_recently_ordered_products(
+    client: PicnicClientProtocol,
+) -> list[dict]:
+    """Get unique products from recent deliveries, deduped by picnic_id."""
+    summaries = await client.get_deliveries()
+    seen: dict[str, dict] = {}  # picnic_id -> product info
+
+    for summary in summaries[:5]:  # last 5 deliveries
+        delivery_id = summary.get("delivery_id") or summary.get("id")
+        if not delivery_id:
+            continue
+        try:
+            detail = await client.get_delivery(delivery_id)
+        except Exception:
+            continue
+
+        flat_items = _flatten_delivery_items(detail)
+        for fi in flat_items:
+            pid = fi["picnic_id"]
+            if pid not in seen:
+                seen[pid] = {
+                    "picnic_id": pid,
+                    "name": fi["name"],
+                    "unit_quantity": fi.get("unit_quantity"),
+                    "image_id": fi.get("image_id"),
+                    "price_cents": fi.get("price_cents"),
+                }
+
+    return list(seen.values())

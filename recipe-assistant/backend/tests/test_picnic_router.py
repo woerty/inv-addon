@@ -108,6 +108,23 @@ async def test_get_pending_orders(client, override_picnic_client):
     assert "quantity_map" in data
 
 
+async def test_get_recent_products(client, override_picnic_client):
+    resp = await client.get("/api/picnic/orders/recent-products")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "products" in data
+    products = data["products"]
+    assert len(products) == 2
+    ids = {p["picnic_id"] for p in products}
+    assert ids == {"s100", "s200"}
+    # Check shape
+    for p in products:
+        assert "name" in p
+        assert "unit_quantity" in p
+        assert "image_id" in p
+        assert "price_cents" in p
+
+
 async def test_get_categories(client, override_picnic_client):
     fake = override_picnic_client
     fake.categories = [{"id": "cat1", "name": "Obst", "items": []}]
