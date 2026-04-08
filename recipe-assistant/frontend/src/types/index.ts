@@ -92,17 +92,6 @@ export interface ImportCommitResponse {
   promoted: number;
 }
 
-export interface ShoppingListItem {
-  id: number;
-  inventory_barcode: string | null;
-  picnic_id: string | null;
-  picnic_name: string | null;
-  name: string;
-  quantity: number;
-  picnic_status: "mapped" | "unavailable";
-  added_at: string;
-}
-
 export interface PicnicSearchResult {
   picnic_id: string;
   name: string;
@@ -111,18 +100,84 @@ export interface PicnicSearchResult {
   price_cents: number | null;
 }
 
-export interface CartSyncItemResult {
-  shopping_list_id: number;
-  picnic_id: string | null;
-  status: "added" | "skipped_unmapped" | "failed";
-  failure_reason: string | null;
+// ── Cart (Picnic as source of truth) ──────────────────────────────
+
+export interface CartItem {
+  picnic_id: string;
+  name: string;
+  quantity: number;
+  unit_quantity: string | null;
+  image_id: string | null;
+  price_cents: number | null;
+  total_price_cents: number | null;
 }
 
-export interface CartSyncResponse {
-  results: CartSyncItemResult[];
-  added_count: number;
-  failed_count: number;
-  skipped_count: number;
+export interface Cart {
+  items: CartItem[];
+  total_items: number;
+  total_price_cents: number;
+}
+
+// ── Pending Orders ────────────────────────────────────────────────
+
+export interface PendingOrderItem {
+  picnic_id: string;
+  name: string;
+  quantity: number;
+  image_id: string | null;
+  price_cents: number | null;
+}
+
+export interface PendingOrder {
+  delivery_id: string;
+  status: string;
+  delivery_time: string | null;
+  total_items: number;
+  items: PendingOrderItem[];
+}
+
+export interface PendingOrdersResponse {
+  orders: PendingOrder[];
+  quantity_map: Record<string, number>;
+}
+
+// ── Product Detail ────────────────────────────────────────────────
+
+export interface ProductDetail {
+  picnic_id: string;
+  name: string;
+  unit_quantity: string | null;
+  image_id: string | null;
+  price_cents: number | null;
+  description: string | null;
+  in_cart: number;
+  on_order: number;
+  inventory_quantity: number;
+  is_subscribed: boolean;
+}
+
+// ── Categories ────────────────────────────────────────────────────
+
+export interface CategoryItem {
+  picnic_id: string;
+  name: string;
+  unit_quantity: string | null;
+  image_id: string | null;
+  price_cents: number | null;
+}
+
+export interface SubCategory {
+  id: string;
+  name: string;
+  image_id: string | null;
+  items: CategoryItem[];
+}
+
+export interface PicnicCategory {
+  id: string;
+  name: string;
+  image_id: string | null;
+  children: SubCategory[];
 }
 
 // Tracked products (auto-restock)

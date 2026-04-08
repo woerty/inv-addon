@@ -10,9 +10,11 @@ import type {
   ImportFetchResponse,
   ImportDecision,
   ImportCommitResponse,
-  ShoppingListItem as PicnicShoppingListItem,
   PicnicSearchResult,
-  CartSyncResponse,
+  Cart,
+  PendingOrdersResponse,
+  ProductDetail,
+  PicnicCategory,
   TrackedProduct,
   TrackedProductCreate,
   TrackedProductUpdate,
@@ -196,31 +198,32 @@ export const commitPicnicImport = (delivery_id: string, decisions: ImportDecisio
 export const searchPicnic = (q: string) =>
   request<{ results: PicnicSearchResult[] }>(`/picnic/search?q=${encodeURIComponent(q)}`);
 
-export const getShoppingList = () =>
-  request<PicnicShoppingListItem[]>("/picnic/shopping-list");
+export const getCart = () =>
+  request<Cart>("/picnic/cart");
 
-export const addShoppingListItem = (data: {
-  inventory_barcode?: string;
-  picnic_id?: string;
-  name: string;
-  quantity: number;
-}) =>
-  request<PicnicShoppingListItem>("/picnic/shopping-list", {
+export const cartAdd = (picnic_id: string, count: number = 1) =>
+  request<Cart>("/picnic/cart/add", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: JSON.stringify({ picnic_id, count }),
   });
 
-export const updateShoppingListItem = (id: number, data: { quantity?: number; picnic_id?: string }) =>
-  request<PicnicShoppingListItem>(`/picnic/shopping-list/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(data),
+export const cartRemove = (picnic_id: string, count: number = 1) =>
+  request<Cart>("/picnic/cart/remove", {
+    method: "POST",
+    body: JSON.stringify({ picnic_id, count }),
   });
 
-export const deleteShoppingListItem = (id: number) =>
-  request<{ message: string }>(`/picnic/shopping-list/${id}`, { method: "DELETE" });
+export const cartClear = () =>
+  request<Cart>("/picnic/cart/clear", { method: "POST" });
 
-export const syncShoppingListToCart = () =>
-  request<CartSyncResponse>("/picnic/shopping-list/sync", { method: "POST" });
+export const getPendingOrders = () =>
+  request<PendingOrdersResponse>("/picnic/orders/pending");
+
+export const getProductDetail = (picnicId: string) =>
+  request<ProductDetail>(`/picnic/products/${encodeURIComponent(picnicId)}`);
+
+export const getCategories = (depth: number = 2) =>
+  request<{ categories: PicnicCategory[] }>(`/picnic/categories?depth=${depth}`);
 
 export const startPicnicLogin = () =>
   request<{ status: PicnicLoginStartStatus }>("/picnic/login/start", { method: "POST" });
