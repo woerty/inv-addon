@@ -84,3 +84,56 @@ async def test_shopping_list_crud_and_sync(client: AsyncClient, override_picnic_
 
     delete = await client.delete(f"/api/picnic/shopping-list/{item_id}")
     assert delete.status_code == 200
+
+
+async def test_get_cart(client, override_picnic_client):
+    fake = override_picnic_client
+    fake.cart_items = {"s100": 2}
+    resp = await client.get("/api/picnic/cart")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_items"] == 2
+    assert len(data["items"]) == 1
+    assert data["items"][0]["picnic_id"] == "s100"
+
+
+async def test_cart_add(client, override_picnic_client):
+    resp = await client.post("/api/picnic/cart/add", json={"picnic_id": "s100", "count": 3})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_items"] == 3
+
+
+async def test_cart_remove(client, override_picnic_client):
+    fake = override_picnic_client
+    fake.cart_items = {"s100": 5}
+    resp = await client.post("/api/picnic/cart/remove", json={"picnic_id": "s100", "count": 2})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_items"] == 3
+
+
+async def test_cart_clear(client, override_picnic_client):
+    fake = override_picnic_client
+    fake.cart_items = {"s100": 5, "s200": 2}
+    resp = await client.post("/api/picnic/cart/clear")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_items"] == 0
+
+
+async def test_get_pending_orders(client, override_picnic_client):
+    resp = await client.get("/api/picnic/orders/pending")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "orders" in data
+    assert "quantity_map" in data
+
+
+async def test_get_categories(client, override_picnic_client):
+    fake = override_picnic_client
+    fake.categories = [{"id": "cat1", "name": "Obst", "items": []}]
+    resp = await client.get("/api/picnic/categories")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "categories" in data

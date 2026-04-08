@@ -28,10 +28,16 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.picnic import PicnicProduct, ShoppingListItem
 from app.schemas.picnic import (
+    CartModifyRequest,
+    CartResponse,
     CartSyncResponse,
+    CategoriesResponse,
+    Category,
+    CategoryItem,
     ImportCommitRequest,
     ImportCommitResponse,
     ImportFetchResponse,
+    PendingOrdersResponse,
     PicnicLoginSendCodeRequest,
     PicnicLoginSendCodeResponse,
     PicnicLoginStartResponse,
@@ -41,12 +47,20 @@ from app.schemas.picnic import (
     PicnicSearchResponse,
     PicnicSearchResult,
     PicnicStatusResponse,
+    ProductDetailResponse,
     ShoppingListAddRequest,
     ShoppingListItemResponse,
     ShoppingListUpdateRequest,
+    SubCategory,
 )
-from app.services.picnic.cart import resolve_shopping_list_status, sync_shopping_list_to_cart
-from app.services.picnic.catalog import PicnicProductData, upsert_product
+from app.services.picnic.cart import (
+    _parse_cart_quantities,
+    parse_cart_response,
+    resolve_shopping_list_status,
+    sync_shopping_list_to_cart,
+)
+from app.services.picnic.catalog import PicnicProductData, get_product, upsert_product
+from app.services.picnic.orders import parse_pending_orders
 from app.services.picnic.client import (
     PicnicClientProtocol,
     PicnicNotConfigured,
@@ -373,3 +387,167 @@ async def clear_cache_entry(picnic_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(row)
     await db.commit()
     return {"message": "deleted"}
+
+
+# ── Cart endpoints ────────────────────────────────────────────────────────────
+
+@router.get("/cart", response_model=CartResponse)
+async def get_cart(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    return await parse_cart_response(client)
+
+
+@router.post("/cart/add", response_model=CartResponse)
+async def cart_add(
+    body: CartModifyRequest,
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    await client.add_product(body.picnic_id, count=body.count)
+    return await parse_cart_response(client)
+
+
+@router.post("/cart/remove", response_model=CartResponse)
+async def cart_remove(
+    body: CartModifyRequest,
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    await client.remove_product(body.picnic_id, count=body.count)
+    return await parse_cart_response(client)
+
+
+@router.post("/cart/clear", response_model=CartResponse)
+async def cart_clear(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    await client.clear_cart()
+    return await parse_cart_response(client)
+
+
+# ── Pending orders ────────────────────────────────────────────────────────────
+
+@router.get("/orders/pending", response_model=PendingOrdersResponse)
+async def get_pending_orders(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    return await parse_pending_orders(client)
+
+
+# ── Categories ────────────────────────────────────────────────────────────────
+
+@router.get("/categories", response_model=CategoriesResponse)
+async def get_categories(
+    depth: int = 2,
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    raw = await client.get_categories(depth=depth)
+    categories: list[Category] = []
+    for group in raw:
+        children: list[SubCategory] = []
+        for sub in group.get("items", []):
+            if sub.get("type") == "CATEGORY":
+                items: list[CategoryItem] = []
+                for product in sub.get("items", []):
+                    if product.get("type") == "SINGLE_ARTICLE":
+                        items.append(
+                            CategoryItem(
+                                picnic_id=product.get("id", ""),
+                                name=product.get("name", ""),
+                                unit_quantity=product.get("unit_quantity"),
+                                image_id=product.get("image_id"),
+                                price_cents=product.get("display_price"),
+                            )
+                        )
+                children.append(
+                    SubCategory(
+                        id=sub.get("id", ""),
+                        name=sub.get("name", ""),
+                        image_id=sub.get("image_id"),
+                        items=items,
+                    )
+                )
+        categories.append(
+            Category(
+                id=group.get("id", ""),
+                name=group.get("name", ""),
+                image_id=group.get("image_id"),
+                children=children,
+            )
+        )
+    return CategoriesResponse(categories=categories)
+
+
+# ── Product detail ────────────────────────────────────────────────────────────
+
+@router.get("/products/{picnic_id}", response_model=ProductDetailResponse)
+async def get_product_detail(
+    picnic_id: str,
+    db: AsyncSession = Depends(get_db),
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    from app.models.inventory import InventoryItem
+    from app.models.tracked_product import TrackedProduct
+
+    try:
+        article = await client.get_article(picnic_id)
+    except Exception:
+        article = {}
+
+    # Check cart quantity
+    cart_quantities = {}
+    try:
+        raw_cart = await client.get_cart()
+        cart_quantities = _parse_cart_quantities(raw_cart)
+    except Exception:
+        pass
+
+    # Check pending order quantity
+    on_order = 0
+    try:
+        pending = await parse_pending_orders(client)
+        on_order = pending.quantity_map.get(picnic_id, 0)
+    except Exception:
+        pass
+
+    # Check inventory via EAN match
+    inventory_quantity = 0
+    cached = await get_product(db, picnic_id)
+    if cached and cached.ean:
+        result = await db.execute(
+            select(InventoryItem.quantity).where(InventoryItem.barcode == cached.ean)
+        )
+        row = result.scalar_one_or_none()
+        if row is not None:
+            inventory_quantity = row
+
+    # Check subscription
+    is_subscribed = False
+    tp_result = await db.execute(
+        select(TrackedProduct).where(TrackedProduct.picnic_id == picnic_id)
+    )
+    is_subscribed = tp_result.scalar_one_or_none() is not None
+
+    name = article.get("name", cached.name if cached else "Unknown")
+    unit_quantity = article.get("unit_quantity", cached.unit_quantity if cached else None)
+    image_id = article.get("image_id", cached.image_id if cached else None)
+    price_cents = article.get("display_price", cached.last_price_cents if cached else None)
+
+    return ProductDetailResponse(
+        picnic_id=picnic_id,
+        name=name,
+        unit_quantity=unit_quantity,
+        image_id=image_id,
+        price_cents=price_cents,
+        description=article.get("description"),
+        in_cart=cart_quantities.get(picnic_id, 0),
+        on_order=on_order,
+        inventory_quantity=inventory_quantity,
+        is_subscribed=is_subscribed,
+    )

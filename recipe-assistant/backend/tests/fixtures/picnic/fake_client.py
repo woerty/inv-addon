@@ -61,6 +61,7 @@ class FakePicnicClient:
         if picnic_id in self.raise_on_add:
             raise RuntimeError(self.raise_on_add[picnic_id])
         self.added_products.append((picnic_id, count))
+        self.cart_items[picnic_id] = self.cart_items.get(picnic_id, 0) + count
         return {"ok": True}
 
     async def get_user(self) -> dict[str, Any]:

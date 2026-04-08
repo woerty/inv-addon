@@ -189,6 +189,28 @@ async def sync_shopping_list_to_cart(
     )
 
 
+def _parse_cart_quantities(raw: dict) -> dict[str, int]:
+    """Parse raw cart response into a picnic_id -> total quantity map."""
+    quantities: dict[str, int] = {}
+    for line in raw.get("items", []):
+        inner = line.get("items", [])
+        if inner:
+            product = inner[0]
+            picnic_id = product.get("id", line.get("id", ""))
+            qty_raw = product.get("decorators", [])
+            quantity = 1
+            for d in qty_raw:
+                if d.get("type") == "QUANTITY":
+                    quantity = d.get("quantity", 1)
+                    break
+        else:
+            picnic_id = line.get("id", "")
+            quantity = line.get("quantity", line.get("count", 1))
+        if picnic_id:
+            quantities[picnic_id] = quantities.get(picnic_id, 0) + quantity
+    return quantities
+
+
 async def parse_cart_response(
     client: PicnicClientProtocol,
 ) -> CartResponse:
