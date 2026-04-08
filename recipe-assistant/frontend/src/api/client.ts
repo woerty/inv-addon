@@ -222,6 +222,9 @@ export const getPendingOrders = () =>
 export const getProductDetail = (picnicId: string) =>
   request<ProductDetail>(`/picnic/products/${encodeURIComponent(picnicId)}`);
 
+export const getRecentProducts = () =>
+  request<{ products: PicnicSearchResult[] }>("/picnic/orders/recent-products");
+
 export const getCategories = (depth: number = 2) =>
   request<{ categories: PicnicCategory[] }>(`/picnic/categories?depth=${depth}`);
 
