@@ -340,7 +340,15 @@ async def get_pending_orders(
     client: PicnicClientProtocol = Depends(get_picnic_client),
     _: None = Depends(_require_enabled),
 ):
-    return await parse_pending_orders(client)
+    try:
+        return await parse_pending_orders(client)
+    except PicnicNotConfigured:
+        raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
+    except Exception:
+        log.exception("Failed to fetch pending orders")
+        return PendingOrdersResponse(orders=[], quantity_map={})
 
 
 @router.get("/orders/recent-products")
@@ -350,7 +358,11 @@ async def get_recent_products(
 ):
     from app.services.picnic.orders import get_recently_ordered_products
 
-    products = await get_recently_ordered_products(client)
+    try:
+        products = await get_recently_ordered_products(client)
+    except Exception:
+        log.exception("Failed to fetch recent products")
+        products = []
     return {"products": products}
 
 
@@ -362,30 +374,59 @@ async def get_categories(
     client: PicnicClientProtocol = Depends(get_picnic_client),
     _: None = Depends(_require_enabled),
 ):
-    raw = await client.get_categories(depth=depth)
+    try:
+        raw = await client.get_categories(depth=depth)
+    except PicnicNotConfigured:
+        raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
+    except Exception:
+        log.exception("Failed to fetch categories")
+        return CategoriesResponse(categories=[])
+
     categories: list[Category] = []
     for group in raw:
+        if not isinstance(group, dict):
+            continue
         children: list[SubCategory] = []
         for sub in group.get("items", []):
-            if sub.get("type") == "CATEGORY":
+            if not isinstance(sub, dict):
+                continue
+            sub_type = sub.get("type", "")
+            # Accept both CATEGORY sub-groups and direct product listings
+            if sub_type == "CATEGORY" or "items" in sub:
                 items: list[CategoryItem] = []
                 for product in sub.get("items", []):
-                    if product.get("type") == "SINGLE_ARTICLE":
-                        items.append(
-                            CategoryItem(
-                                picnic_id=product.get("id", ""),
-                                name=product.get("name", ""),
-                                unit_quantity=product.get("unit_quantity"),
-                                image_id=product.get("image_id"),
-                                price_cents=product.get("display_price"),
-                            )
+                    if not isinstance(product, dict):
+                        continue
+                    pid = product.get("id")
+                    if not pid:
+                        continue
+                    items.append(
+                        CategoryItem(
+                            picnic_id=pid,
+                            name=product.get("name", ""),
+                            unit_quantity=product.get("unit_quantity"),
+                            image_id=product.get("image_id"),
+                            price_cents=product.get("display_price"),
                         )
+                    )
                 children.append(
                     SubCategory(
                         id=sub.get("id", ""),
                         name=sub.get("name", ""),
                         image_id=sub.get("image_id"),
                         items=items,
+                    )
+                )
+            elif sub.get("id"):
+                # Leaf product directly under the group (no sub-category nesting)
+                children.append(
+                    SubCategory(
+                        id=sub.get("id", ""),
+                        name=sub.get("name", ""),
+                        image_id=sub.get("image_id"),
+                        items=[],
                     )
                 )
         categories.append(
