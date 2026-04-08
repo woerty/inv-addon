@@ -3,11 +3,6 @@ import {
   getPicnicStatus,
   fetchPicnicImport,
   commitPicnicImport,
-  getShoppingList,
-  addShoppingListItem,
-  updateShoppingListItem,
-  deleteShoppingListItem,
-  syncShoppingListToCart,
   searchPicnic,
   startPicnicLogin,
   sendPicnicLoginCode,
@@ -18,9 +13,7 @@ import type {
   PicnicLoginChannel,
   ImportFetchResponse,
   ImportDecision,
-  ShoppingListItem,
   PicnicSearchResult,
-  CartSyncResponse,
 } from "../types";
 
 export function usePicnicStatus() {
@@ -137,47 +130,6 @@ export function usePicnicImport() {
   );
 
   return { data, loading, error, fetchImport, commit };
-}
-
-export function useShoppingList() {
-  const [items, setItems] = useState<ShoppingListItem[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const refetch = useCallback(async () => {
-    setLoading(true);
-    try {
-      setItems(await getShoppingList());
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refetch();
-  }, [refetch]);
-
-  const add = async (data: Parameters<typeof addShoppingListItem>[0]) => {
-    await addShoppingListItem(data);
-    await refetch();
-  };
-
-  const update = async (id: number, data: Parameters<typeof updateShoppingListItem>[1]) => {
-    await updateShoppingListItem(id, data);
-    await refetch();
-  };
-
-  const remove = async (id: number) => {
-    await deleteShoppingListItem(id);
-    await refetch();
-  };
-
-  const sync = async (): Promise<CartSyncResponse> => {
-    const result = await syncShoppingListToCart();
-    await refetch();
-    return result;
-  };
-
-  return { items, loading, refetch, add, update, remove, sync };
 }
 
 export function usePicnicSearch() {
