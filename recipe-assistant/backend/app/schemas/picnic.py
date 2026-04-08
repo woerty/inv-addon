@@ -159,3 +159,92 @@ class PicnicProductCacheEntry(BaseModel):
     last_seen: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Cart (Picnic as source of truth) ──────────────────────────────
+
+class CartItemResponse(BaseModel):
+    picnic_id: str
+    name: str
+    quantity: int
+    unit_quantity: str | None = None
+    image_id: str | None = None
+    price_cents: int | None = None
+    total_price_cents: int | None = None
+
+
+class CartResponse(BaseModel):
+    items: list[CartItemResponse]
+    total_items: int
+    total_price_cents: int
+
+
+class CartModifyRequest(BaseModel):
+    picnic_id: str
+    count: int = 1
+
+
+# ── Pending Orders ────────────────────────────────────────────────
+
+class PendingOrderItem(BaseModel):
+    picnic_id: str
+    name: str
+    quantity: int
+    image_id: str | None = None
+    price_cents: int | None = None
+
+
+class PendingOrder(BaseModel):
+    delivery_id: str
+    status: str
+    delivery_time: datetime | None = None
+    total_items: int
+    items: list[PendingOrderItem]
+
+
+class PendingOrdersResponse(BaseModel):
+    orders: list[PendingOrder]
+    quantity_map: dict[str, int]
+
+
+# ── Product Detail ────────────────────────────────────────────────
+
+class ProductDetailResponse(BaseModel):
+    picnic_id: str
+    name: str
+    unit_quantity: str | None = None
+    image_id: str | None = None
+    price_cents: int | None = None
+    description: str | None = None
+    in_cart: int = 0
+    on_order: int = 0
+    inventory_quantity: int = 0
+    is_subscribed: bool = False
+
+
+# ── Categories ────────────────────────────────────────────────────
+
+class CategoryItem(BaseModel):
+    picnic_id: str
+    name: str
+    unit_quantity: str | None = None
+    image_id: str | None = None
+    price_cents: int | None = None
+
+
+class SubCategory(BaseModel):
+    id: str
+    name: str
+    image_id: str | None = None
+    items: list[CategoryItem] = []
+
+
+class Category(BaseModel):
+    id: str
+    name: str
+    image_id: str | None = None
+    children: list[SubCategory] = []
+
+
+class CategoriesResponse(BaseModel):
+    categories: list[Category]
