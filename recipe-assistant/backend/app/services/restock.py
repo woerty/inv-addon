@@ -1,9 +1,6 @@
 """Auto-restock service: checks inventory decrements against tracked-product
-thresholds and seeds the shopping list when consumption drops below `min_quantity`.
-
-Add-only semantics: we only add or raise shopping list quantities, never
-remove or reduce. Rationale documented in
-docs/superpowers/specs/2026-04-05-auto-restock-design.md.
+thresholds and adds directly to the Picnic cart when consumption drops below
+`min_quantity`.
 """
 
 from __future__ import annotations
@@ -15,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.log import InventoryLog
-from app.models.picnic import ShoppingListItem
 from app.models.tracked_product import TrackedProduct
+from app.services.picnic.cart import _parse_cart_quantities
+from app.services.picnic.client import PicnicClientProtocol
 
 log = logging.getLogger("restock")
 
@@ -25,7 +23,6 @@ log = logging.getLogger("restock")
 class RestockResult:
     barcode: str
     added_quantity: int
-    shopping_list_item_id: int
 
 
 async def check_and_enqueue(
@@ -34,85 +31,83 @@ async def check_and_enqueue(
     new_quantity: int,
     *,
     tracked: TrackedProduct | None = None,
+    picnic_client: PicnicClientProtocol | None = None,
 ) -> RestockResult | None:
     """Check if `new_quantity` crossed the threshold for `barcode` and
-    upsert the shopping list accordingly.
+    add the deficit directly to the Picnic cart.
 
-    MUST be called by the caller AFTER decrementing inventory, BEFORE
-    db.commit(). Runs in the caller's transaction — either both writes
-    land or neither. This function does not commit.
+    If no picnic_client is provided, or the TrackedProduct has no picnic_id,
+    a warning is logged and None is returned.
+
+    The caller owns the transaction; this function does not commit.
 
     If the caller already has the TrackedProduct row (e.g. they queried
     it to make a delete decision), pass it via the `tracked` kwarg to
     avoid a duplicate SELECT. Otherwise the function queries it itself.
 
-    Returns None if no tracked rule exists or if new_quantity >= min_quantity.
-    Returns RestockResult(...) if the shopping list was upserted.
+    Returns None if no tracked rule exists, new_quantity >= min_quantity,
+    no picnic_id/client, or the cart already has enough. Returns
+    RestockResult(...) if items were added to the Picnic cart.
     """
     if tracked is None:
-        tracked = (
-            await db.execute(
-                select(TrackedProduct).where(TrackedProduct.barcode == barcode)
-            )
-        ).scalar_one_or_none()
+        result = await db.execute(
+            select(TrackedProduct).where(TrackedProduct.barcode == barcode)
+        )
+        tracked = result.scalar_one_or_none()
+
     if tracked is None:
         return None
+
     if new_quantity >= tracked.min_quantity:
         return None
 
+    if not tracked.picnic_id or picnic_client is None:
+        log.warning("Cannot restock %s: no picnic_id or no client", barcode)
+        return None
+
     needed = tracked.target_quantity - new_quantity
-    # Defensive: target > min > 0 and new_quantity < min, so needed > 0. If
-    # something upstream bypassed the check constraints, fail loudly.
     if needed <= 0:
-        raise ValueError(
-            f"tracked_products row for {barcode} is inconsistent: "
-            f"target={tracked.target_quantity} new_qty={new_quantity}"
-        )
+        return None
 
-    # Dedup against any existing shopping list entry for this barcode. Pick
-    # the most recent one if multiple somehow exist; raise its quantity if
-    # smaller, leave it alone if larger.
-    existing = (
-        await db.execute(
-            select(ShoppingListItem)
-            .where(ShoppingListItem.inventory_barcode == barcode)
-            .order_by(ShoppingListItem.id.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    # Check what's already in cart to avoid over-ordering (dedup)
+    already_in_cart = 0
+    try:
+        raw_cart = await picnic_client.get_cart()
+        cart_quantities = _parse_cart_quantities(raw_cart)
+        already_in_cart = cart_quantities.get(tracked.picnic_id, 0)
+    except Exception:
+        log.warning("Failed to fetch cart for restock dedup, proceeding anyway")
 
-    if existing is not None:
-        if existing.quantity < needed:
-            existing.quantity = needed
-        item_id = existing.id
-    else:
-        new_item = ShoppingListItem(
-            inventory_barcode=barcode,
-            picnic_id=tracked.picnic_id,
-            name=tracked.name,
-            quantity=needed,
+    delta = needed - already_in_cart
+    if delta <= 0:
+        log.info(
+            "Restock skip %s: need %d, already %d in cart",
+            barcode,
+            needed,
+            already_in_cart,
         )
-        db.add(new_item)
-        await db.flush()
-        item_id = new_item.id
+        return None
 
+    try:
+        await picnic_client.add_product(tracked.picnic_id, count=delta)
+    except Exception:
+        log.exception("Failed to add %s to Picnic cart", tracked.picnic_id)
+        return None
+
+    # Log the action
     db.add(
         InventoryLog(
             barcode=barcode,
             action="restock_auto",
-            details=f"qty→{new_quantity}, list qty={needed}",
+            details=f"qty→{new_quantity}, cart delta={delta}",
         )
     )
 
     log.info(
-        "restock_auto barcode=%s new_qty=%d needed=%d item_id=%d",
+        "Restock %s: added %d to Picnic cart (was %d in cart, need %d)",
         barcode,
-        new_quantity,
+        delta,
+        already_in_cart,
         needed,
-        item_id,
     )
-    return RestockResult(
-        barcode=barcode,
-        added_quantity=needed,
-        shopping_list_item_id=item_id,
-    )
+    return RestockResult(barcode=barcode, added_quantity=delta)

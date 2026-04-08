@@ -252,8 +252,10 @@ async def create_tracked(
     await db.flush()
 
     # Immediate check: if the inventory quantity is already below the new
-    # threshold, seed the shopping list in the same transaction.
-    await check_and_enqueue(db, barcode=effective_barcode, new_quantity=current_qty)
+    # threshold, add directly to the Picnic cart in the same transaction.
+    await check_and_enqueue(
+        db, barcode=effective_barcode, new_quantity=current_qty, picnic_client=client
+    )
 
     result = await _build_read_model(db, tp, current_quantity=current_qty)
     await db.commit()
@@ -264,6 +266,7 @@ async def create_tracked(
 async def update_tracked(
     barcode: str,
     req: TrackedProductUpdate,
+    client: PicnicClientProtocol = Depends(get_picnic_client),
     db: AsyncSession = Depends(get_db),
 ):
     _require_enabled()
@@ -291,10 +294,12 @@ async def update_tracked(
     await db.flush()
 
     # Re-run the threshold check so a raised min_quantity/target_quantity
-    # is reflected in the shopping list. Lowered thresholds are no-ops by
+    # triggers a Picnic cart addition. Lowered thresholds are no-ops by
     # add-only semantics.
     current_qty = await _current_inventory_quantity(db, barcode)
-    await check_and_enqueue(db, barcode=barcode, new_quantity=current_qty)
+    await check_and_enqueue(
+        db, barcode=barcode, new_quantity=current_qty, picnic_client=client
+    )
 
     result = await _build_read_model(db, tp, current_quantity=current_qty)
     await db.commit()

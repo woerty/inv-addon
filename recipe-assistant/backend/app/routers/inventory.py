@@ -65,15 +65,16 @@ async def _apply_decrement(
     *,
     action: str,
     log_details: str,
+    picnic_client: PicnicClientProtocol | None = None,
 ) -> bool:
     """Apply a quantity decrement plus tracking-aware rules.
 
     - Sets item.quantity = new_quantity.
     - If new_quantity == 0 and the product has a TrackedProduct rule,
       the row is kept (zombie); otherwise it is deleted.
-    - Runs restock.check_and_enqueue when the row is kept (may upsert a
-      ShoppingListItem in the same transaction); skipped on the delete
-      branch because there is no tracked rule to check against.
+    - Runs restock.check_and_enqueue when the row is kept (adds directly
+      to the Picnic cart if picnic_client is provided); skipped on the
+      delete branch because there is no tracked rule to check against.
     - Writes an InventoryLog entry with the given action and details.
 
     Returns True if the inventory row was deleted, False if it was kept.
@@ -93,7 +94,11 @@ async def _apply_decrement(
     item.quantity = new_quantity
     await _log_action(db, item.barcode, action, log_details)
     await check_and_enqueue(
-        db, barcode=item.barcode, new_quantity=new_quantity, tracked=tracked
+        db,
+        barcode=item.barcode,
+        new_quantity=new_quantity,
+        tracked=tracked,
+        picnic_client=picnic_client,
     )
     return False
 
@@ -377,6 +382,7 @@ async def remove_item_by_barcode(
             if new_qty > 0
             else "removed last item"
         ),
+        picnic_client=await _opt_picnic_client(),
     )
     await db.commit()
     if deleted:
@@ -450,6 +456,7 @@ async def scan_out(
             if new_qty > 0
             else "removed last item"
         ),
+        picnic_client=await _opt_picnic_client(),
     )
     await db.commit()
     return {
@@ -585,6 +592,7 @@ async def update_item(
                 req.quantity,
                 action="update" if req.quantity > 0 else "delete",
                 log_details=f"quantity: {old_qty} → {req.quantity}",
+                picnic_client=await _opt_picnic_client(),
             )
             if deleted:
                 await db.commit()

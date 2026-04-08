@@ -1,9 +1,7 @@
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
 
 from app.main import app
-from app.models.picnic import ShoppingListItem
 from app.services.picnic.client import get_picnic_client
 from tests.conftest import TestingSessionLocal
 from tests.fixtures.picnic.fake_client import FakePicnicClient
@@ -67,18 +65,17 @@ async def test_create_tracked_product(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_create_seeds_shopping_list_if_below_threshold(client: AsyncClient):
+async def test_create_adds_to_picnic_cart_if_below_threshold(
+    client: AsyncClient, override_picnic_client: FakePicnicClient
+):
     response = await client.post(
         "/api/tracked-products",
         json={"barcode": "4014400900057", "min_quantity": 1, "target_quantity": 4},
     )
     assert response.status_code == 201
 
-    async with TestingSessionLocal() as session:
-        items = (await session.execute(select(ShoppingListItem))).scalars().all()
-    assert len(items) == 1
-    assert items[0].inventory_barcode == "4014400900057"
-    assert items[0].quantity == 4  # target - current=0
+    # Restock should have called add_product with the full target (4 - 0)
+    assert ("s100", 4) in override_picnic_client.added_products
 
 
 @pytest.mark.asyncio
@@ -134,7 +131,9 @@ async def test_list_tracked_products_joins_current_quantity(client: AsyncClient)
 
 
 @pytest.mark.asyncio
-async def test_patch_tracked_product_updates_and_rechecks(client: AsyncClient):
+async def test_patch_tracked_product_updates_and_rechecks(
+    client: AsyncClient, override_picnic_client: FakePicnicClient
+):
     # Seed qty=1 inventory and rule min=1 target=2 → not below threshold
     await client.post(
         "/api/inventory/barcode", json={"barcode": "4014400900057"}
@@ -143,9 +142,8 @@ async def test_patch_tracked_product_updates_and_rechecks(client: AsyncClient):
         "/api/tracked-products",
         json={"barcode": "4014400900057", "min_quantity": 1, "target_quantity": 2},
     )
-    async with TestingSessionLocal() as session:
-        items = (await session.execute(select(ShoppingListItem))).scalars().all()
-    assert items == []
+    # No cart additions yet (qty=1 >= min=1)
+    assert override_picnic_client.added_products == []
 
     # Raise min_quantity to 3 → now below threshold, check should fire
     response = await client.patch(
@@ -155,10 +153,8 @@ async def test_patch_tracked_product_updates_and_rechecks(client: AsyncClient):
     assert response.status_code == 200
     assert response.json()["below_threshold"] is True
 
-    async with TestingSessionLocal() as session:
-        items = (await session.execute(select(ShoppingListItem))).scalars().all()
-    assert len(items) == 1
-    assert items[0].quantity == 4  # target=5 - current=1
+    # Restock should have added delta = target(5) - current(1) = 4 to cart
+    assert ("s100", 4) in override_picnic_client.added_products
 
 
 @pytest.mark.asyncio
