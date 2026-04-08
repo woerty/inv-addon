@@ -18,9 +18,6 @@ import CropFreeIcon from "@mui/icons-material/CropFree";
 import RestaurantIcon from "@mui/icons-material/Restaurant";
 import ChatIcon from "@mui/icons-material/Chat";
 import PeopleIcon from "@mui/icons-material/People";
-import LocalGroceryStoreIcon from "@mui/icons-material/LocalGroceryStore";
-import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
-import AddAlertIcon from "@mui/icons-material/AddAlert";
 import StorefrontIcon from "@mui/icons-material/Storefront";
 import LoginIcon from "@mui/icons-material/Login";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -45,10 +42,7 @@ const Navbar = () => {
     ...NAV_ITEMS,
     ...(status?.enabled
       ? [
-          { path: "/picnic-import", label: "Picnic-Import", icon: <LocalGroceryStoreIcon /> },
-          { path: "/shopping-list", label: "Einkaufsliste", icon: <ShoppingCartIcon /> },
-          { path: "/tracked-products", label: "Nachbestellungen", icon: <AddAlertIcon /> },
-          { path: "/picnic-store", label: "Picnic Store", icon: <StorefrontIcon /> },
+          { path: "/picnic", label: "Picnic", icon: <StorefrontIcon /> },
         ]
       : status?.needs_login
       ? [

@@ -18,12 +18,11 @@ import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import FileUploadIcon from "@mui/icons-material/FileUpload";
 import ImageSearchIcon from "@mui/icons-material/ImageSearch";
 import RefreshIcon from "@mui/icons-material/Refresh";
-import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import LocalGroceryStoreIcon from "@mui/icons-material/LocalGroceryStore";
 import { IconButton } from "@mui/material";
 import { useInventory } from "../hooks/useInventory";
 import { useNotification } from "../components/NotificationProvider";
-import { exportData, importData, relookupBarcode, relookupAllUnknown, backfillImages, addShoppingListItem } from "../api/client";
+import { exportData, importData, relookupBarcode, relookupAllUnknown, backfillImages } from "../api/client";
 import { usePicnicStatus } from "../hooks/usePicnic";
 import { useTrackedProducts } from "../hooks/useTrackedProducts";
 import InventoryRestockButton from "../components/tracked/InventoryRestockButton";
@@ -378,28 +377,7 @@ const InventoryPage = () => {
                   >
                     Speichern
                   </Button>
-                  {picnicStatus?.enabled && (
-                    <IconButton
-                      size="small"
-                      color="primary"
-                      title="Zur Einkaufsliste hinzufügen"
-                      onClick={async () => {
-                        try {
-                          await addShoppingListItem({
-                            inventory_barcode: item.barcode,
-                            name: item.name,
-                            quantity: 1,
-                          });
-                          notify(`${item.name} zur Einkaufsliste hinzugefügt`, "success");
-                        } catch (e) {
-                          notify(e instanceof Error ? e.message : "Fehler", "error");
-                        }
-                      }}
-                      sx={{ mr: 1 }}
-                    >
-                      <ShoppingCartIcon fontSize="small" />
-                    </IconButton>
-                  )}
+
                   <Button
                     variant="outlined"
                     color="error"

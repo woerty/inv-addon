@@ -7,10 +7,7 @@ import ScanStationPage from "./pages/ScanStationPage";
 import RecipesPage from "./pages/RecipesPage";
 import ChatPage from "./pages/ChatPage";
 import PersonsPage from "./pages/PersonsPage";
-import PicnicImportPage from "./pages/PicnicImportPage";
 import PicnicLoginPage from "./pages/PicnicLoginPage";
-import ShoppingListPage from "./pages/ShoppingListPage";
-import TrackedProductsPage from "./pages/TrackedProductsPage";
 import PicnicStorePage from "./pages/PicnicStorePage";
 
 const AppContent = () => {
@@ -27,11 +24,8 @@ const AppContent = () => {
         <Route path="/recipes" element={<RecipesPage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/persons" element={<PersonsPage />} />
-        <Route path="/picnic-import" element={<PicnicImportPage />} />
         <Route path="/picnic-login" element={<PicnicLoginPage />} />
-        <Route path="/shopping-list" element={<ShoppingListPage />} />
-        <Route path="/tracked-products" element={<TrackedProductsPage />} />
-        <Route path="/picnic-store" element={<PicnicStorePage />} />
+        <Route path="/picnic" element={<PicnicStorePage />} />
       </Routes>
     </>
   );
