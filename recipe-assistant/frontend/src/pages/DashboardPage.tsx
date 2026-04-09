@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Box, ToggleButton, ToggleButtonGroup, Typography, CircularProgress } from "@mui/material";
+import { Box, Divider, ToggleButton, ToggleButtonGroup, Typography, CircularProgress } from "@mui/material";
 import { useDashboard, useProductDetail } from "../hooks/useDashboard";
 import { usePicnicPendingOrders } from "../hooks/usePicnicOrders";
 import { usePicnicStatus } from "../hooks/usePicnic";
@@ -62,7 +62,9 @@ const DashboardPage = () => {
       </Box>
 
       {/* Live Status */}
-      <Typography variant="overline" color="text.secondary">Live Status</Typography>
+      <Typography variant="overline" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+        Live Status
+      </Typography>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2, mb: 3 }}>
         <PinnedProducts products={data.pinned_products} />
         {picnicStatus?.enabled && (
@@ -72,8 +74,12 @@ const DashboardPage = () => {
         <RecentActivity entries={data.recent_activity} />
       </Box>
 
+      <Divider sx={{ my: 2 }} />
+
       {/* Analyse */}
-      <Typography variant="overline" color="text.secondary">Analyse</Typography>
+      <Typography variant="overline" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+        Analyse
+      </Typography>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>
         <Box sx={{ gridColumn: { md: "1 / -1" } }}>
           <ConsumptionTrend trend={data.consumption_trend} />

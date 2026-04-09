@@ -31,6 +31,11 @@ export default function RecentActivity({ entries }: Props) {
       <Typography variant="subtitle2" color="text.secondary" gutterBottom>
         Letzte Aktivität
       </Typography>
+      {entries.length === 0 && (
+        <Typography variant="body2" color="text.secondary">
+          Keine Aktivitäten im Zeitraum
+        </Typography>
+      )}
       {entries.map((e, i) => (
         <Box key={i} sx={{ display: "flex", justifyContent: "space-between", py: 0.5 }}>
           <Typography variant="body2" noWrap sx={{ flex: 1 }}>

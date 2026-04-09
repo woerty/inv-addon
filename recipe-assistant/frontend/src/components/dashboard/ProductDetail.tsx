@@ -8,11 +8,13 @@ interface Props {
   onClose: () => void;
 }
 
+const formatDate = (ts: number) =>
+  new Date(ts).toLocaleDateString("de-DE", { day: "numeric", month: "numeric" });
+
 export default function ProductDetail({ detail, onClose }: Props) {
   const chartData = detail.history.map((h) => ({
-    time: new Date(h.timestamp).toLocaleDateString("de-DE", { day: "numeric", month: "numeric" }),
+    time: new Date(h.timestamp).getTime(),
     quantity: h.quantity_after,
-    isRestock: h.action === "restock_auto" || h.action === "add",
   }));
 
   return (
@@ -36,10 +38,21 @@ export default function ProductDetail({ detail, onClose }: Props) {
       {chartData.length > 0 ? (
         <ResponsiveContainer width="100%" height={250}>
           <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-            <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+            <XAxis
+              dataKey="time"
+              type="number"
+              scale="time"
+              domain={["dataMin", "dataMax"]}
+              tickFormatter={formatDate}
+              tick={{ fontSize: 11 }}
+            />
             <YAxis tick={{ fontSize: 11 }} />
-            <Tooltip />
+            <Tooltip
+              labelFormatter={(ts) => new Date(Number(ts)).toLocaleString("de-DE", {
+                day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit"
+              })}
+            />
             <Line type="stepAfter" dataKey="quantity" stroke="#5c6bc0" strokeWidth={2} dot={{ r: 3 }} />
             {detail.min_quantity !== null && (
               <ReferenceLine y={detail.min_quantity} stroke="#f44336" strokeDasharray="6 3" label="min" />

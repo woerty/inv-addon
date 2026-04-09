@@ -33,7 +33,7 @@ export default function RestockCostsWidget({ costs }: Props) {
           <BarChart data={chartData}>
             <XAxis dataKey="week" tick={{ fontSize: 10 }} />
             <YAxis tick={{ fontSize: 10 }} />
-            <Tooltip formatter={(v) => `€${Number(Array.isArray(v) ? v[0] : v ?? 0).toFixed(2)}`} />
+            <Tooltip formatter={(v) => `€${Number(v ?? 0).toFixed(2)}`} />
             <Bar dataKey="euro" fill="#5c6bc0" radius={[3, 3, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
