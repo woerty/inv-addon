@@ -25,6 +25,7 @@ class InventoryItemResponse(BaseModel):
     storage_location: StorageLocationResponse | None = None
     expiration_date: date | None = None
     image_url: str | None = None
+    is_pinned: bool = False
     added_date: datetime
     updated_date: datetime
 
