@@ -19,6 +19,8 @@ import type {
   TrackedProductUpdate,
   ResolvePreview,
   PromoteBarcodeResponse,
+  DashboardSummary,
+  DashboardProductDetail,
 } from "../types";
 
 const basePath = new URL(document.baseURI).pathname.replace(/\/$/, "");
@@ -279,3 +281,15 @@ export const promoteTrackedProductBarcode = (
       body: JSON.stringify({ new_barcode: newBarcode }),
     }
   );
+
+// Dashboard
+export const getDashboardSummary = (days: number = 30) =>
+  request<DashboardSummary>(`/dashboard/summary?days=${days}`);
+
+export const getDashboardProductDetail = (barcode: string, days: number = 30) =>
+  request<DashboardProductDetail>(`/dashboard/product/${encodeURIComponent(barcode)}?days=${days}`);
+
+export const togglePin = (barcode: string) =>
+  request<{ barcode: string; is_pinned: boolean }>(`/dashboard/pin/${encodeURIComponent(barcode)}`, {
+    method: "PATCH",
+  });

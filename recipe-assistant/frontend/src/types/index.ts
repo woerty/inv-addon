@@ -222,3 +222,101 @@ export interface PromoteBarcodeResponse {
   tracked: TrackedProduct;
   merged: boolean;
 }
+
+// ── Dashboard ────────────────────────────────────────────────────
+
+export interface PinnedProduct {
+  barcode: string;
+  name: string;
+  quantity: number;
+  min_quantity: number | null;
+  image_url: string | null;
+}
+
+export interface LowStockItem {
+  barcode: string;
+  name: string;
+  quantity: number;
+  min_quantity: number;
+}
+
+export interface ActivityEntry {
+  action: string;
+  barcode: string;
+  product_name: string;
+  details: string | null;
+  timestamp: string;
+}
+
+export interface TrendSeries {
+  category: string;
+  data: number[];
+}
+
+export interface ConsumptionTrend {
+  labels: string[];
+  series: TrendSeries[];
+}
+
+export interface TopConsumer {
+  barcode: string;
+  name: string;
+  count: number;
+  sparkline: number[];
+}
+
+export interface CategoryCount {
+  category: string;
+  inventory_count: number;
+  on_order_count: number;
+}
+
+export interface WeeklyCost {
+  week: string;
+  cents: number;
+}
+
+export interface RestockCosts {
+  total_cents: number;
+  previous_period_cents: number;
+  weekly: WeeklyCost[];
+}
+
+export interface StorageLocationCount {
+  name: string;
+  item_count: number;
+}
+
+export interface DashboardSummary {
+  pinned_products: PinnedProduct[];
+  low_stock: LowStockItem[];
+  recent_activity: ActivityEntry[];
+  consumption_trend: ConsumptionTrend;
+  top_consumers: TopConsumer[];
+  categories: CategoryCount[];
+  restock_costs: RestockCosts;
+  storage_locations: StorageLocationCount[];
+}
+
+export interface ProductHistoryEntry {
+  timestamp: string;
+  quantity_after: number;
+  action: string;
+}
+
+export interface ProductStats {
+  total_consumed: number;
+  avg_per_week: number;
+  times_restocked: number;
+  total_cost_cents: number;
+  estimated_days_remaining: number | null;
+}
+
+export interface DashboardProductDetail {
+  barcode: string;
+  name: string;
+  current_quantity: number;
+  min_quantity: number | null;
+  history: ProductHistoryEntry[];
+  stats: ProductStats;
+}
