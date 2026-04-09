@@ -424,9 +424,9 @@ async def get_categories(
         raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
     except PicnicReauthRequired:
         raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
-    except Exception:
+    except Exception as exc:
         log.exception("Failed to fetch categories")
-        return CategoriesResponse(categories=[])
+        return {"categories": [], "_error": str(exc), "_type": type(exc).__name__}
 
     categories: list[Category] = []
     for group in raw:
@@ -482,8 +482,8 @@ async def get_categories(
             )
         )
     result = CategoriesResponse(categories=categories)
-    # Debug: return raw structure when parsing yields nothing
-    if not categories and raw:
+    # Debug: always include raw info when categories empty
+    if not categories:
         sample = []
         for g in raw[:3]:
             if isinstance(g, dict):
@@ -501,7 +501,7 @@ async def get_categories(
                         entry["_first_item"]["_first_inner"] = {k: v for k, v in inner[0].items() if k != "items"}
                         entry["_first_item"]["_first_inner"]["_keys"] = list(inner[0].keys())
                 sample.append(entry)
-        return {"categories": [], "_debug_raw_sample": sample, "_raw_count": len(raw)}
+        return {"categories": [], "_debug_raw_sample": sample, "_raw_count": len(raw), "_raw_type": type(raw).__name__}
     return result
 
 
