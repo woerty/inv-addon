@@ -281,6 +281,50 @@ async def list_cache(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
+@router.get("/debug/raw-delivery")
+async def debug_raw_delivery(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+):
+    """Temporary debug: return raw delivery detail for first delivery."""
+    deliveries = await client.get_deliveries()
+    if not deliveries:
+        return {"deliveries": [], "detail": None}
+    first = deliveries[0]
+    detail = await client.get_delivery(first["id"])
+    # Extract first product line for inspection
+    sample_line = None
+    for order in detail.get("orders", []):
+        for line in order.get("items", []):
+            sample_line = line
+            break
+        if sample_line:
+            break
+    return {"delivery_summary": first, "sample_line": sample_line}
+
+
+@router.get("/debug/raw-categories")
+async def debug_raw_categories(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+):
+    """Temporary debug: return raw category data."""
+    raw = await client.get_categories(depth=1)
+    # Return first 3 groups with truncated items
+    result = []
+    for group in raw[:3]:
+        g = {"id": group.get("id"), "name": group.get("name"), "type": group.get("type"),
+             "image_id": group.get("image_id"), "keys": list(group.keys())}
+        items = group.get("items", [])[:2]
+        g["sample_items"] = [
+            {"id": i.get("id"), "name": i.get("name"), "type": i.get("type"),
+             "image_id": i.get("image_id"), "keys": list(i.keys()),
+             "sub_items_count": len(i.get("items", [])),
+             "sub_items_sample": [{"id": si.get("id"), "name": si.get("name"), "type": si.get("type"), "keys": list(si.keys())} for si in i.get("items", [])[:2]] if i.get("items") else None}
+            for i in items if isinstance(i, dict)
+        ]
+        result.append(g)
+    return {"total_groups": len(raw), "sample": result}
+
+
 @router.delete("/cache/{picnic_id}")
 async def clear_cache_entry(picnic_id: str, db: AsyncSession = Depends(get_db)):
     """Admin/debug: clear a cache entry so the next lookup refetches from Picnic."""
