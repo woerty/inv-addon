@@ -398,12 +398,13 @@ async def get_pending_orders(
 @router.get("/orders/recent-products")
 async def get_recent_products(
     client: PicnicClientProtocol = Depends(get_picnic_client),
+    db: AsyncSession = Depends(get_db),
     _: None = Depends(_require_enabled),
 ):
     from app.services.picnic.orders import get_recently_ordered_products
 
     try:
-        products = await get_recently_ordered_products(client)
+        products = await get_recently_ordered_products(client, db=db)
     except Exception:
         log.exception("Failed to fetch recent products")
         products = []

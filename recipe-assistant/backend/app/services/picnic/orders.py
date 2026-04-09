@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.schemas.picnic import (
     PendingOrder,
     PendingOrderItem,
@@ -63,11 +65,12 @@ async def parse_pending_orders(
 
 async def get_recently_ordered_products(
     client: PicnicClientProtocol,
+    db: AsyncSession | None = None,
 ) -> list[dict]:
-    """Get unique products from recent deliveries, enriched via get_article().
+    """Get unique products from recent deliveries, enriched from DB cache.
 
-    Delivery items lack price/image data, so we fetch each product's catalog
-    entry to get display_price and image_id.
+    Delivery items lack price/image data. We enrich from the picnic_products
+    cache table (populated by search and import) — no extra API calls needed.
     """
     summaries = await client.get_deliveries()
     seen: dict[str, dict] = {}  # picnic_id -> product info
@@ -93,24 +96,27 @@ async def get_recently_ordered_products(
                     "price_cents": fi.get("price_cents"),
                 }
 
-    # Limit to 20 most recent unique products
-    import asyncio
     products = list(seen.values())[:20]
 
-    # Enrich in parallel — delivery items lack price/image
-    async def _enrich(product: dict) -> None:
-        if product.get("price_cents") and product.get("image_id"):
-            return
-        try:
-            article = await client.get_article(product["picnic_id"])
-            if not product.get("image_id"):
-                product["image_id"] = article.get("image_id")
-            if not product.get("price_cents"):
-                product["price_cents"] = article.get("display_price")
-            if not product.get("unit_quantity"):
-                product["unit_quantity"] = article.get("unit_quantity")
-        except Exception:
-            log.debug("Could not enrich product %s", product["picnic_id"])
+    # Enrich from DB cache (fast, no API calls)
+    if db:
+        from sqlalchemy import select
+        from app.models.picnic import PicnicProduct
 
-    await asyncio.gather(*[_enrich(p) for p in products])
+        pids = [p["picnic_id"] for p in products]
+        result = await db.execute(
+            select(PicnicProduct).where(PicnicProduct.picnic_id.in_(pids))
+        )
+        cache = {row.picnic_id: row for row in result.scalars().all()}
+
+        for product in products:
+            cached = cache.get(product["picnic_id"])
+            if cached:
+                if not product.get("image_id"):
+                    product["image_id"] = cached.image_id
+                if not product.get("price_cents"):
+                    product["price_cents"] = cached.last_price_cents
+                if not product.get("unit_quantity"):
+                    product["unit_quantity"] = cached.unit_quantity
+
     return products

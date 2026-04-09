@@ -14,7 +14,6 @@ import type {
   Cart,
   PendingOrdersResponse,
   ProductDetail,
-  PicnicCategory,
   TrackedProduct,
   TrackedProductCreate,
   TrackedProductUpdate,
@@ -225,8 +224,6 @@ export const getProductDetail = (picnicId: string) =>
 export const getRecentProducts = () =>
   request<{ products: PicnicSearchResult[] }>("/picnic/orders/recent-products");
 
-export const getCategories = (depth: number = 2) =>
-  request<{ categories: PicnicCategory[] }>(`/picnic/categories?depth=${depth}`);
 
 export const startPicnicLogin = () =>
   request<{ status: PicnicLoginStartStatus }>("/picnic/login/start", { method: "POST" });
