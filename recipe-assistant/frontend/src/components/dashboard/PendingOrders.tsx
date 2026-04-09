@@ -1,4 +1,5 @@
 import { Box, Paper, Typography } from "@mui/material";
+import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import type { PendingOrder, Cart } from "../../types";
 
 interface Props {
@@ -8,10 +9,11 @@ interface Props {
 
 export default function PendingOrders({ orders, cart }: Props) {
   return (
-    <Paper sx={{ p: 2, height: "100%" }}>
-      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-        Laufende Bestellungen
-      </Typography>
+    <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: 2 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 1 }}>
+        <LocalShippingIcon sx={{ fontSize: 18, color: "text.secondary" }} />
+        <Typography variant="subtitle2" color="text.secondary">Laufende Bestellungen</Typography>
+      </Box>
       {orders.map((o) => (
         <Box key={o.delivery_id} sx={{ bgcolor: "action.hover", borderRadius: 1, p: 1, mb: 1 }}>
           <Box sx={{ display: "flex", justifyContent: "space-between" }}>
@@ -48,3 +50,4 @@ export default function PendingOrders({ orders, cart }: Props) {
     </Paper>
   );
 }
+

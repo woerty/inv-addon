@@ -1,4 +1,5 @@
-import { Paper, Typography } from "@mui/material";
+import { Box, Paper, Typography } from "@mui/material";
+import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { ConsumptionTrend as TrendData } from "../../types";
 
@@ -21,10 +22,11 @@ export default function ConsumptionTrend({ trend }: Props) {
   });
 
   return (
-    <Paper sx={{ p: 2 }}>
-      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-        Verbrauchstrend
-      </Typography>
+    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 1 }}>
+        <TrendingUpIcon sx={{ fontSize: 18, color: "text.secondary" }} />
+        <Typography variant="subtitle2" color="text.secondary">Verbrauchstrend</Typography>
+      </Box>
       {chartData.length === 0 ? (
         <Typography variant="body2" color="text.secondary">Keine Daten im Zeitraum</Typography>
       ) : (

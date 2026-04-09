@@ -1,12 +1,6 @@
-import { Box, Paper, Typography } from "@mui/material";
+import { Box, Chip, Paper, Typography } from "@mui/material";
+import PushPinIcon from "@mui/icons-material/PushPin";
 import type { PinnedProduct } from "../../types";
-
-function qtyColor(qty: number, min: number | null): string {
-  if (qty === 0) return "error.main";
-  if (min !== null && qty < min) return "error.main";
-  if (min !== null && qty === min) return "warning.main";
-  return "success.main";
-}
 
 interface Props {
   products: PinnedProduct[];
@@ -14,23 +8,28 @@ interface Props {
 
 export default function PinnedProducts({ products }: Props) {
   return (
-    <Paper sx={{ p: 2, height: "100%" }}>
-      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-        Gepinnte Produkte
-      </Typography>
+    <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: 2 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 1 }}>
+        <PushPinIcon sx={{ fontSize: 18, color: "text.secondary" }} />
+        <Typography variant="subtitle2" color="text.secondary">Gepinnte Produkte</Typography>
+      </Box>
       {products.length === 0 && (
         <Typography variant="body2" color="text.secondary">
           Keine Produkte gepinnt
         </Typography>
       )}
       {products.map((p) => (
-        <Box key={p.barcode} sx={{ display: "flex", justifyContent: "space-between", py: 0.5 }}>
+        <Box key={p.barcode} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", py: 0.5 }}>
           <Typography variant="body2" noWrap sx={{ flex: 1 }}>
             {p.name}
           </Typography>
-          <Typography variant="body2" fontWeight={600} color={qtyColor(p.quantity, p.min_quantity)}>
-            {p.quantity}
-          </Typography>
+          <Chip
+            label={p.quantity}
+            size="small"
+            color={p.quantity === 0 ? "error" : (p.min_quantity !== null && p.quantity <= p.min_quantity) ? "warning" : "success"}
+            variant="filled"
+            sx={{ minWidth: 32, fontWeight: 600 }}
+          />
         </Box>
       ))}
     </Paper>

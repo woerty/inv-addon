@@ -66,11 +66,15 @@ const DashboardPage = () => {
         Live Status
       </Typography>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2, mb: 3 }}>
-        <PinnedProducts products={data.pinned_products} />
+        {data.pinned_products.length > 0 && (
+          <PinnedProducts products={data.pinned_products} />
+        )}
         {picnicStatus?.enabled && (
           <PendingOrders orders={orders ?? []} cart={cart} />
         )}
-        <LowStockAlerts items={data.low_stock} />
+        {data.low_stock.length > 0 && (
+          <LowStockAlerts items={data.low_stock} />
+        )}
         <RecentActivity entries={data.recent_activity} />
       </Box>
 

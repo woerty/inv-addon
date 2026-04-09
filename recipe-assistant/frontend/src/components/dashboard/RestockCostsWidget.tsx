@@ -1,4 +1,5 @@
 import { Box, Paper, Typography } from "@mui/material";
+import EuroIcon from "@mui/icons-material/Euro";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import type { RestockCosts } from "../../types";
 
@@ -14,10 +15,11 @@ export default function RestockCostsWidget({ costs }: Props) {
   const chartData = costs.weekly.map((w) => ({ week: w.week, euro: w.cents / 100 }));
 
   return (
-    <Paper sx={{ p: 2, height: "100%" }}>
-      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-        Restock-Kosten
-      </Typography>
+    <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: 2 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 1 }}>
+        <EuroIcon sx={{ fontSize: 18, color: "text.secondary" }} />
+        <Typography variant="subtitle2" color="text.secondary">Restock-Kosten</Typography>
+      </Box>
       <Box sx={{ textAlign: "center", mb: 1 }}>
         <Typography variant="h5" fontWeight={700}>
           €{(costs.total_cents / 100).toFixed(2)}
