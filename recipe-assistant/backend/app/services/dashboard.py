@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,7 +115,7 @@ def _week_label(dt: datetime) -> str:
 async def get_consumption_trend(
     db: AsyncSession, days: int = 30
 ) -> ConsumptionTrend:
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
     query = (
         select(
             InventoryLog.timestamp,
@@ -152,7 +152,7 @@ async def get_consumption_trend(
 async def get_top_consumers(
     db: AsyncSession, days: int = 30, limit: int = 10
 ) -> list[TopConsumer]:
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
 
     # Total counts
     count_q = (
@@ -183,7 +183,7 @@ async def get_top_consumers(
 
     # Sparkline data: split time range into 4 buckets
     bucket_size = max(days // 4, 1)
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     result = []
     for bc in barcodes:
@@ -227,6 +227,7 @@ async def get_category_counts(db: AsyncSession) -> list[CategoryCount]:
     )
     rows = (await db.execute(query)).all()
     return [
+        # on_order_count: v1 always 0, enriching from Picnic pending orders is a follow-up
         CategoryCount(category=r.category, inventory_count=r.cnt, on_order_count=0)
         for r in rows
     ]
@@ -243,7 +244,7 @@ def _parse_restock_delta(details: str | None) -> int:
 async def get_restock_costs(
     db: AsyncSession, days: int = 30
 ) -> RestockCosts:
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
     previous_since = since - timedelta(days=days)
 
     # Current period
@@ -342,7 +343,7 @@ def _parse_quantity_after(details: str | None) -> int | None:
 async def get_product_detail(
     db: AsyncSession, barcode: str, days: int = 30
 ) -> ProductDetailResponse:
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
 
     # Get current item
     item = (

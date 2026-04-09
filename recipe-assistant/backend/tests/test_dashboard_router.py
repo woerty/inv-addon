@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
 
@@ -33,7 +33,7 @@ async def _seed(client: AsyncClient):
         pp = PicnicProduct(picnic_id="p222", name="Butter", last_price_cents=199)
         db.add_all([tp, pp])
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         logs = [
             InventoryLog(barcode="111", action="remove", details="quantity: 4 \u2192 3", timestamp=now - timedelta(hours=2)),
             InventoryLog(barcode="222", action="restock_auto", details="qty\u21924, cart delta=2", timestamp=now - timedelta(days=3)),

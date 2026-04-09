@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import AfterValidator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,9 +23,19 @@ from app.services.dashboard import (
 router = APIRouter()
 
 
+def _validate_days(v: int) -> int:
+    if v not in (7, 30, 90):
+        raise ValueError("days must be 7, 30, or 90")
+    return v
+
+
+# FastAPI coerces query string → int, AfterValidator then enforces the allowed set.
+DaysParam = Annotated[int, Query(), AfterValidator(_validate_days)]
+
+
 @router.get("/summary", response_model=DashboardSummary)
 async def dashboard_summary(
-    days: int = 30,
+    days: DaysParam = 30,
     db: AsyncSession = Depends(get_db),
 ):
     return DashboardSummary(
@@ -40,7 +53,7 @@ async def dashboard_summary(
 @router.get("/product/{barcode}", response_model=ProductDetailResponse)
 async def product_detail(
     barcode: str,
-    days: int = 30,
+    days: DaysParam = 30,
     db: AsyncSession = Depends(get_db),
 ):
     return await get_product_detail(db, barcode=barcode, days=days)

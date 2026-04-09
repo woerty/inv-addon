@@ -1,5 +1,5 @@
 import pytest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.inventory import InventoryItem, StorageLocation
@@ -52,7 +52,7 @@ async def _seed_basics(db: AsyncSession):
     db.add(pp)
     await db.flush()
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     logs = [
         InventoryLog(barcode="111", action="remove", details="quantity: 4 → 3", timestamp=now - timedelta(days=1)),
         InventoryLog(barcode="111", action="remove", details="quantity: 5 → 4", timestamp=now - timedelta(days=3)),
