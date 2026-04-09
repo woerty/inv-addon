@@ -406,8 +406,9 @@ async def get_product_detail(
     )
     logs = (await db.execute(logs_q)).scalars().all()
 
-    # Build history: reconstruct quantity at each point
-    history = []
+    # Build history: one data point per day (end-of-day quantity).
+    # Multiple events on the same day collapse into the last known quantity.
+    daily_qty: dict[str, tuple[str, int, str]] = {}  # date -> (iso_ts, qty, action)
     for log in logs:
         qty_after = _parse_quantity_after(log.details)
         if log.details == "removed last item":
@@ -415,13 +416,14 @@ async def get_product_detail(
         if log.details == "new item":
             qty_after = 1
         if qty_after is not None:
-            history.append(
-                ProductHistoryEntry(
-                    timestamp=log.timestamp.isoformat(),
-                    quantity_after=qty_after,
-                    action=log.action,
-                )
-            )
+            day = log.timestamp.strftime("%Y-%m-%d")
+            # Keep latest entry per day (logs are ordered by timestamp)
+            daily_qty[day] = (log.timestamp.isoformat(), qty_after, log.action)
+
+    history = [
+        ProductHistoryEntry(timestamp=ts, quantity_after=qty, action=act)
+        for ts, qty, act in daily_qty.values()
+    ]
 
     # Stats
     consumed = sum(1 for log in logs if log.action in CONSUME_ACTIONS)
