@@ -52,7 +52,7 @@ def _flatten_delivery_items(detail: dict[str, Any]) -> list[dict[str, Any]]:
                     "name": product.get("name", ""),
                     "unit_quantity": product.get("unit_quantity"),
                     "image_id": product.get("image_id"),
-                    "price_cents": product.get("display_price") or product.get("price"),
+                    "price_cents": product.get("display_price"),
                     "quantity": qty,
                 }
             )

@@ -64,7 +64,11 @@ async def parse_pending_orders(
 async def get_recently_ordered_products(
     client: PicnicClientProtocol,
 ) -> list[dict]:
-    """Get unique products from recent deliveries, deduped by picnic_id."""
+    """Get unique products from recent deliveries, enriched via get_article().
+
+    Delivery items lack price/image data, so we fetch each product's catalog
+    entry to get display_price and image_id.
+    """
     summaries = await client.get_deliveries()
     seen: dict[str, dict] = {}  # picnic_id -> product info
 
@@ -89,4 +93,24 @@ async def get_recently_ordered_products(
                     "price_cents": fi.get("price_cents"),
                 }
 
-    return list(seen.values())
+    # Limit to 20 most recent unique products
+    import asyncio
+    products = list(seen.values())[:20]
+
+    # Enrich in parallel — delivery items lack price/image
+    async def _enrich(product: dict) -> None:
+        if product.get("price_cents") and product.get("image_id"):
+            return
+        try:
+            article = await client.get_article(product["picnic_id"])
+            if not product.get("image_id"):
+                product["image_id"] = article.get("image_id")
+            if not product.get("price_cents"):
+                product["price_cents"] = article.get("display_price")
+            if not product.get("unit_quantity"):
+                product["unit_quantity"] = article.get("unit_quantity")
+        except Exception:
+            log.debug("Could not enrich product %s", product["picnic_id"])
+
+    await asyncio.gather(*[_enrich(p) for p in products])
+    return products

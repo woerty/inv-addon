@@ -412,7 +412,7 @@ async def get_recent_products(
 
 # ── Categories ────────────────────────────────────────────────────────────────
 
-@router.get("/categories", response_model=CategoriesResponse)
+@router.get("/categories")
 async def get_categories(
     depth: int = 2,
     client: PicnicClientProtocol = Depends(get_picnic_client),
@@ -481,7 +481,28 @@ async def get_categories(
                 children=children,
             )
         )
-    return CategoriesResponse(categories=categories)
+    result = CategoriesResponse(categories=categories)
+    # Debug: return raw structure when parsing yields nothing
+    if not categories and raw:
+        sample = []
+        for g in raw[:3]:
+            if isinstance(g, dict):
+                entry = {k: v for k, v in g.items() if k != "items"}
+                entry["_keys"] = list(g.keys())
+                sub_items = g.get("items", [])
+                entry["_items_count"] = len(sub_items)
+                if sub_items and isinstance(sub_items[0], dict):
+                    first = sub_items[0]
+                    entry["_first_item"] = {k: v for k, v in first.items() if k != "items"}
+                    entry["_first_item"]["_keys"] = list(first.keys())
+                    inner = first.get("items", [])
+                    entry["_first_item"]["_items_count"] = len(inner)
+                    if inner and isinstance(inner[0], dict):
+                        entry["_first_item"]["_first_inner"] = {k: v for k, v in inner[0].items() if k != "items"}
+                        entry["_first_item"]["_first_inner"]["_keys"] = list(inner[0].keys())
+                sample.append(entry)
+        return {"categories": [], "_debug_raw_sample": sample, "_raw_count": len(raw)}
+    return result
 
 
 # ── Product detail ────────────────────────────────────────────────────────────
