@@ -12,7 +12,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.add_column(
         "inventory",
-        sa.Column("is_pinned", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("is_pinned", sa.Boolean(), nullable=False, server_default=sa.text("false")),
     )
 
 

@@ -30,7 +30,7 @@ class InventoryItem(Base):
     )
     image_url: Mapped[str | None] = mapped_column(String, nullable=True)
     is_pinned: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("0")
+        Boolean, nullable=False, server_default=text("false")
     )
     expiration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     added_date: Mapped[datetime] = mapped_column(
