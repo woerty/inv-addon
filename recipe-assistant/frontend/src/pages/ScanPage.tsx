@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  Box,
   Button,
   FormControl,
   FormControlLabel,
@@ -70,7 +69,7 @@ const ScanPage = () => {
   };
 
   return (
-    <Paper sx={{ p: 2, m: 2 }}>
+    <Paper variant="outlined" sx={{ p: 3, m: { xs: 1, md: 2 }, borderRadius: 3 }}>
       <Typography variant="h4" gutterBottom>
         Barcode Scanner
       </Typography>
@@ -83,8 +82,8 @@ const ScanPage = () => {
         </RadioGroup>
       </FormControl>
 
-      <Box sx={{ position: "relative" }}>
-        <video ref={ref} style={{ width: "100%", maxHeight: 300, borderRadius: 8 }} />
+      <Paper variant="outlined" sx={{ position: "relative", overflow: "hidden", borderRadius: 2, mb: 1 }}>
+        <video ref={ref} style={{ width: "100%", maxHeight: 300, display: "block" }} />
         <IconButton
           onClick={toggleCamera}
           sx={{
@@ -98,7 +97,7 @@ const ScanPage = () => {
         >
           <CameraswitchIcon />
         </IconButton>
-      </Box>
+      </Paper>
 
       {lastScanned && (
         <Paper
@@ -106,7 +105,7 @@ const ScanPage = () => {
             mt: 1,
             mb: 1,
             p: 1.5,
-            bgcolor: "#e8f5e9",
+            bgcolor: "rgba(46, 125, 50, 0.08)",
             textAlign: "center",
           }}
         >

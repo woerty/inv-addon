@@ -46,7 +46,7 @@ const DashboardPage = () => {
   if (!data) return null;
 
   return (
-    <Box sx={{ p: 2, maxWidth: 1200, mx: "auto" }}>
+    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1200, mx: "auto" }}>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
         <Typography variant="h5">Dashboard</Typography>
         <ToggleButtonGroup
@@ -62,7 +62,7 @@ const DashboardPage = () => {
       </Box>
 
       {/* Live Status */}
-      <Typography variant="overline" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1, display: "block", pl: 1, borderLeft: 3, borderColor: "primary.main" }}>
         Live Status
       </Typography>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2, mb: 3 }}>
@@ -81,7 +81,7 @@ const DashboardPage = () => {
       <Divider sx={{ my: 2 }} />
 
       {/* Analyse */}
-      <Typography variant="overline" color="text.secondary" sx={{ mb: 1, display: "block" }}>
+      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1, display: "block", pl: 1, borderLeft: 3, borderColor: "primary.main" }}>
         Analyse
       </Typography>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2 }}>

@@ -214,11 +214,11 @@ const InventoryPage = () => {
   ];
 
   return (
-    <Paper sx={{ p: 2, m: 2 }}>
+    <Paper variant="outlined" sx={{ p: 3, m: { xs: 1, md: 2 }, borderRadius: 3 }}>
       <Typography variant="h4" gutterBottom>
         Inventarverwaltung
       </Typography>
-      <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
+      <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
         <Button
           variant="outlined"
           size="small"
@@ -309,7 +309,7 @@ const InventoryPage = () => {
                 key={item.id}
                 sx={{
                   ...(item.quantity === 0 && {
-                    backgroundColor: "action.hover",
+                    backgroundColor: "rgba(198, 40, 40, 0.04)",
                   }),
                 }}
               >
@@ -320,7 +320,7 @@ const InventoryPage = () => {
                         component="img"
                         src={item.image_url}
                         alt=""
-                        sx={{ width: 36, height: 36, objectFit: "contain", flexShrink: 0 }}
+                        sx={{ width: 44, height: 44, objectFit: "contain", flexShrink: 0, borderRadius: 1 }}
                       />
                     )}
                     <span>

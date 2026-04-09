@@ -44,7 +44,7 @@ const ChatPage = () => {
       />
 
       <Paper
-        elevation={3}
+        variant="outlined"
         sx={{
           p: 2,
           maxHeight: "60vh",
@@ -52,6 +52,7 @@ const ChatPage = () => {
           mb: 2,
           display: "flex",
           flexDirection: "column",
+          borderRadius: 3,
         }}
       >
         {messages.length === 0 ? (
@@ -65,9 +66,10 @@ const ChatPage = () => {
               sx={{
                 p: 1,
                 mb: 1,
-                bgcolor: msg.role === "user" ? "#e3f2fd" : "#f1f8e9",
+                bgcolor: msg.role === "user" ? "rgba(21, 101, 192, 0.08)" : "rgba(46, 125, 50, 0.08)",
                 alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
                 maxWidth: "80%",
+                borderRadius: 2,
               }}
             >
               <Typography variant="caption" color="text.secondary">

@@ -60,7 +60,7 @@ const Navbar = () => {
 
   return (
     <>
-      <AppBar position="static">
+      <AppBar position="static" sx={{ background: "linear-gradient(90deg, #0d47a1 0%, #1565c0 100%)" }}>
         <Toolbar>
           <IconButton
             color="inherit"
@@ -70,8 +70,9 @@ const Navbar = () => {
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Inventar & Assistent
+          <InventoryIcon sx={{ mr: 1 }} />
+          <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>
+            Recipe Assistant
           </Typography>
         </Toolbar>
       </AppBar>
@@ -81,13 +82,28 @@ const Navbar = () => {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
       >
-        <Box sx={{ width: 250, pt: 1 }}>
-          <List>
+        <Box sx={{ width: 260, bgcolor: "background.default", height: "100%" }}>
+          <Box sx={{ p: 2, background: "linear-gradient(135deg, #0d47a1 0%, #1565c0 100%)" }}>
+            <Typography variant="h6" sx={{ color: "white", fontWeight: 700 }}>
+              Recipe Assistant
+            </Typography>
+          </Box>
+          <List sx={{ pt: 1 }}>
             {navItems.map((item) => (
               <ListItemButton
                 key={item.path}
                 selected={location.pathname === item.path}
                 onClick={() => handleNav(item.path)}
+                sx={{
+                  mx: 1,
+                  borderRadius: 2,
+                  mb: 0.5,
+                  "&.Mui-selected": {
+                    bgcolor: "primary.50",
+                    color: "primary.main",
+                    "& .MuiListItemIcon-root": { color: "primary.main" },
+                  },
+                }}
               >
                 <ListItemIcon>{item.icon}</ListItemIcon>
                 <ListItemText primary={item.label} />
