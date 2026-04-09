@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -29,6 +29,9 @@ class InventoryItem(Base):
         Integer, ForeignKey("storage_locations.id", ondelete="SET NULL"), nullable=True
     )
     image_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_pinned: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("0")
+    )
     expiration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     added_date: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
