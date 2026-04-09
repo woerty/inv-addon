@@ -156,21 +156,21 @@ async def get_consumption_trend(
     )
     rows = (await db.execute(query)).all()
 
-    # Build week buckets
-    week_set: dict[str, int] = {}
-    cat_week: dict[str, dict[str, int]] = {}
+    # Build daily buckets keyed by ISO date string (YYYY-MM-DD)
+    day_set: dict[str, int] = {}
+    cat_day: dict[str, dict[str, int]] = {}
     for r in rows:
-        wk = _week_label(r.timestamp)
-        if wk not in week_set:
-            week_set[wk] = len(week_set)
+        day = r.timestamp.strftime("%Y-%m-%d")
+        if day not in day_set:
+            day_set[day] = len(day_set)
         norm_cat = _normalize_category(r.category)
-        cat_week.setdefault(norm_cat, {})
-        cat_week[norm_cat][wk] = cat_week[norm_cat].get(wk, 0) + 1
+        cat_day.setdefault(norm_cat, {})
+        cat_day[norm_cat][day] = cat_day[norm_cat].get(day, 0) + 1
 
-    labels = sorted(week_set.keys(), key=lambda w: week_set[w])
+    labels = sorted(day_set.keys())
     series = []
-    for cat, weeks in sorted(cat_week.items()):
-        data = [weeks.get(wk, 0) for wk in labels]
+    for cat, day_counts in sorted(cat_day.items()):
+        data = [day_counts.get(d, 0) for d in labels]
         series.append(TrendSeries(category=cat, data=data))
 
     return ConsumptionTrend(labels=labels, series=series)
