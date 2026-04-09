@@ -26,6 +26,32 @@ from app.schemas.dashboard import (
 
 CONSUME_ACTIONS = ("remove", "scan-out")
 
+# ── Category normalisation ──────────────────────────────────────────
+CATEGORY_MAP = [
+    (["milch", "dairy", "milk", "käse", "cheese", "yogurt", "joghurt", "butter", "sahne", "cream", "quark"], "Milchprodukte"),
+    (["fleisch", "meat", "wurst", "sausage", "chicken", "huhn", "rind", "beef", "schwein", "pork", "poultry", "geflügel"], "Fleisch & Wurst"),
+    (["brot", "bread", "back", "gebäck", "pastry", "toast", "brötchen"], "Backwaren"),
+    (["getränk", "beverage", "drink", "juice", "saft", "wasser", "water", "cola", "limo", "bier", "beer", "wein", "wine", "coffee", "kaffee", "tea", "tee"], "Getränke"),
+    (["obst", "fruit", "gemüse", "vegetable", "salat", "salad", "tomate", "apfel", "banana", "karotte"], "Obst & Gemüse"),
+    (["nudel", "pasta", "reis", "rice", "mehl", "flour", "zucker", "sugar", "öl", "oil", "essig", "vinegar", "gewürz", "spice", "sauce", "senf", "ketchup", "dressing"], "Vorratshaltung"),
+    (["snack", "chip", "schoko", "chocolate", "candy", "süß", "sweet", "cookie", "keks", "riegel", "bar", "eis", "ice cream", "gummi"], "Snacks & Süßes"),
+    (["tiefkühl", "frozen", "pizza", "fertig", "convenience"], "Tiefkühl & Fertig"),
+    (["eier", "egg"], "Eier"),
+    (["reinig", "clean", "wasch", "spül", "seife", "soap", "toilet", "hygien", "zahnpasta", "shampoo", "dusch"], "Haushalt & Hygiene"),
+    (["tier", "pet", "hund", "katze", "dog", "cat", "futter"], "Tierbedarf"),
+]
+
+
+def _normalize_category(raw: str | None) -> str:
+    if not raw or raw == "Unbekannt":
+        return "Sonstiges"
+    lower = raw.lower()
+    for keywords, label in CATEGORY_MAP:
+        for kw in keywords:
+            if kw in lower:
+                return label
+    return "Sonstiges"
+
 
 async def get_pinned_products(db: AsyncSession) -> list[PinnedProduct]:
     query = (
@@ -137,8 +163,9 @@ async def get_consumption_trend(
         wk = _week_label(r.timestamp)
         if wk not in week_set:
             week_set[wk] = len(week_set)
-        cat_week.setdefault(r.category, {})
-        cat_week[r.category][wk] = cat_week[r.category].get(wk, 0) + 1
+        norm_cat = _normalize_category(r.category)
+        cat_week.setdefault(norm_cat, {})
+        cat_week[norm_cat][wk] = cat_week[norm_cat].get(wk, 0) + 1
 
     labels = sorted(week_set.keys(), key=lambda w: week_set[w])
     series = []
@@ -223,14 +250,20 @@ async def get_category_counts(db: AsyncSession) -> list[CategoryCount]:
             func.count().label("cnt"),
         )
         .group_by(InventoryItem.category)
-        .order_by(func.count().desc())
     )
     rows = (await db.execute(query)).all()
-    return [
-        # on_order_count: v1 always 0, enriching from Picnic pending orders is a follow-up
-        CategoryCount(category=r.category, inventory_count=r.cnt, on_order_count=0)
-        for r in rows
-    ]
+
+    # Normalize raw OpenFoodFacts categories and re-aggregate
+    merged: dict[str, int] = {}
+    for r in rows:
+        norm = _normalize_category(r.category)
+        merged[norm] = merged.get(norm, 0) + r.cnt
+
+    return sorted(
+        [CategoryCount(category=cat, inventory_count=cnt, on_order_count=0) for cat, cnt in merged.items()],
+        key=lambda c: c.inventory_count,
+        reverse=True,
+    )
 
 
 def _parse_restock_delta(details: str | None) -> int:
