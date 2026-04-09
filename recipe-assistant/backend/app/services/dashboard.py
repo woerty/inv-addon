@@ -373,6 +373,16 @@ def _parse_quantity_after(details: str | None) -> int | None:
     return None
 
 
+def _parse_quantity_before(details: str | None) -> int | None:
+    """Parse the source quantity from details like 'quantity: 5 → 3'."""
+    if not details:
+        return None
+    m = re.search(r"quantity:\s*(\d+)\s*→", details)
+    if m:
+        return int(m.group(1))
+    return None
+
+
 async def get_product_detail(
     db: AsyncSession, barcode: str, days: int = 30
 ) -> ProductDetailResponse:
@@ -394,6 +404,18 @@ async def get_product_detail(
             select(TrackedProduct.min_quantity).where(TrackedProduct.barcode == barcode)
         )
     ).scalar_one_or_none()
+
+    # Get the last log entry BEFORE the range to know starting quantity
+    pre_log_q = (
+        select(InventoryLog)
+        .where(
+            InventoryLog.barcode == barcode,
+            InventoryLog.timestamp < since,
+        )
+        .order_by(InventoryLog.timestamp.desc())
+        .limit(1)
+    )
+    pre_log = (await db.execute(pre_log_q)).scalars().first()
 
     # Get all logs in range
     logs_q = (
@@ -425,8 +447,41 @@ async def get_product_detail(
         for ts, qty, act in daily_qty.values()
     ]
 
-    # Stats
-    consumed = sum(1 for log in logs if log.action in CONSUME_ACTIONS)
+    # Stats: calculate gross consumption by summing all quantity drops
+    # between consecutive log entries. Restocks (quantity increases) are ignored,
+    # so the rate reflects actual usage, not net change.
+    all_qty = []
+
+    # Seed with starting quantity (before the first change in range).
+    # Try the last log before the range first, then fall back to parsing
+    # the "before" value from the first log's details (e.g. "quantity: 6 → 5" → 6).
+    start_qty_val = None
+    if pre_log:
+        start_qty_val = _parse_quantity_after(pre_log.details)
+        if pre_log.details == "removed last item":
+            start_qty_val = 0
+        if pre_log.details == "new item":
+            start_qty_val = 1
+    elif logs:
+        start_qty_val = _parse_quantity_before(logs[0].details)
+    if start_qty_val is not None:
+        all_qty.append(start_qty_val)
+
+    for log in logs:
+        qty_after = _parse_quantity_after(log.details)
+        if log.details == "removed last item":
+            qty_after = 0
+        if log.details == "new item":
+            qty_after = 1
+        if qty_after is not None:
+            all_qty.append(qty_after)
+
+    consumed = 0
+    for i in range(1, len(all_qty)):
+        drop = all_qty[i - 1] - all_qty[i]
+        if drop > 0:  # only count decreases, ignore restocks
+            consumed += drop
+
     restocked = sum(1 for log in logs if log.action == "restock_auto")
 
     days_in_range = max(days, 1)
