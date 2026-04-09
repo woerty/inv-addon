@@ -221,9 +221,6 @@ export const getPendingOrders = () =>
 export const getProductDetail = (picnicId: string) =>
   request<ProductDetail>(`/picnic/products/${encodeURIComponent(picnicId)}`);
 
-export const getRecentProducts = () =>
-  request<{ products: PicnicSearchResult[] }>("/picnic/orders/recent-products");
-
 
 export const startPicnicLogin = () =>
   request<{ status: PicnicLoginStartStatus }>("/picnic/login/start", { method: "POST" });

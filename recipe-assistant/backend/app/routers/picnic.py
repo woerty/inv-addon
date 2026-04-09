@@ -30,9 +30,6 @@ from app.models.picnic import PicnicProduct
 from app.schemas.picnic import (
     CartModifyRequest,
     CartResponse,
-    CategoriesResponse,
-    Category,
-    CategoryItem,
     ImportCommitRequest,
     ImportCommitResponse,
     ImportFetchResponse,
@@ -47,7 +44,6 @@ from app.schemas.picnic import (
     PicnicSearchResult,
     PicnicStatusResponse,
     ProductDetailResponse,
-    SubCategory,
 )
 from app.services.picnic.cart import (
     _parse_cart_quantities,
@@ -281,49 +277,6 @@ async def list_cache(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
-@router.get("/debug/raw-delivery")
-async def debug_raw_delivery(
-    client: PicnicClientProtocol = Depends(get_picnic_client),
-):
-    """Temporary debug: return raw delivery detail for first delivery."""
-    deliveries = await client.get_deliveries()
-    if not deliveries:
-        return {"deliveries": [], "detail": None}
-    first = deliveries[0]
-    detail = await client.get_delivery(first["id"])
-    # Extract first product line for inspection
-    sample_line = None
-    for order in detail.get("orders", []):
-        for line in order.get("items", []):
-            sample_line = line
-            break
-        if sample_line:
-            break
-    return {"delivery_summary": first, "sample_line": sample_line}
-
-
-@router.get("/debug/raw-categories")
-async def debug_raw_categories(
-    client: PicnicClientProtocol = Depends(get_picnic_client),
-):
-    """Temporary debug: return raw category data."""
-    raw = await client.get_categories(depth=1)
-    # Return first 3 groups with truncated items
-    result = []
-    for group in raw[:3]:
-        g = {"id": group.get("id"), "name": group.get("name"), "type": group.get("type"),
-             "image_id": group.get("image_id"), "keys": list(group.keys())}
-        items = group.get("items", [])[:2]
-        g["sample_items"] = [
-            {"id": i.get("id"), "name": i.get("name"), "type": i.get("type"),
-             "image_id": i.get("image_id"), "keys": list(i.keys()),
-             "sub_items_count": len(i.get("items", [])),
-             "sub_items_sample": [{"id": si.get("id"), "name": si.get("name"), "type": si.get("type"), "keys": list(si.keys())} for si in i.get("items", [])[:2]] if i.get("items") else None}
-            for i in items if isinstance(i, dict)
-        ]
-        result.append(g)
-    return {"total_groups": len(raw), "sample": result}
-
 
 @router.delete("/cache/{picnic_id}")
 async def clear_cache_entry(picnic_id: str, db: AsyncSession = Depends(get_db)):
@@ -395,115 +348,6 @@ async def get_pending_orders(
         return PendingOrdersResponse(orders=[], quantity_map={})
 
 
-@router.get("/orders/recent-products")
-async def get_recent_products(
-    client: PicnicClientProtocol = Depends(get_picnic_client),
-    db: AsyncSession = Depends(get_db),
-    _: None = Depends(_require_enabled),
-):
-    from app.services.picnic.orders import get_recently_ordered_products
-
-    try:
-        products = await get_recently_ordered_products(client, db=db)
-    except Exception:
-        log.exception("Failed to fetch recent products")
-        products = []
-    return {"products": products}
-
-
-# ── Categories ────────────────────────────────────────────────────────────────
-
-@router.get("/categories")
-async def get_categories(
-    depth: int = 2,
-    client: PicnicClientProtocol = Depends(get_picnic_client),
-    _: None = Depends(_require_enabled),
-):
-    try:
-        raw = await client.get_categories(depth=depth)
-    except PicnicNotConfigured:
-        raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
-    except PicnicReauthRequired:
-        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
-    except Exception as exc:
-        log.exception("Failed to fetch categories")
-        return {"categories": [], "_error": str(exc), "_type": type(exc).__name__}
-
-    categories: list[Category] = []
-    for group in raw:
-        if not isinstance(group, dict):
-            continue
-        children: list[SubCategory] = []
-        for sub in group.get("items", []):
-            if not isinstance(sub, dict):
-                continue
-            sub_type = sub.get("type", "")
-            # Accept both CATEGORY sub-groups and direct product listings
-            if sub_type == "CATEGORY" or "items" in sub:
-                items: list[CategoryItem] = []
-                for product in sub.get("items", []):
-                    if not isinstance(product, dict):
-                        continue
-                    pid = product.get("id")
-                    if not pid:
-                        continue
-                    items.append(
-                        CategoryItem(
-                            picnic_id=pid,
-                            name=product.get("name", ""),
-                            unit_quantity=product.get("unit_quantity"),
-                            image_id=product.get("image_id"),
-                            price_cents=product.get("display_price"),
-                        )
-                    )
-                children.append(
-                    SubCategory(
-                        id=sub.get("id", ""),
-                        name=sub.get("name", ""),
-                        image_id=sub.get("image_id"),
-                        items=items,
-                    )
-                )
-            elif sub.get("id"):
-                # Leaf product directly under the group (no sub-category nesting)
-                children.append(
-                    SubCategory(
-                        id=sub.get("id", ""),
-                        name=sub.get("name", ""),
-                        image_id=sub.get("image_id"),
-                        items=[],
-                    )
-                )
-        categories.append(
-            Category(
-                id=group.get("id", ""),
-                name=group.get("name", ""),
-                image_id=group.get("image_id"),
-                children=children,
-            )
-        )
-    result = CategoriesResponse(categories=categories)
-    # Debug: always include raw info when categories empty
-    if not categories:
-        sample = []
-        for g in raw[:3]:
-            if isinstance(g, dict):
-                entry = {k: v for k, v in g.items() if k != "items"}
-                entry["_keys"] = list(g.keys())
-                sub_items = g.get("items", [])
-                entry["_items_count"] = len(sub_items)
-                if sub_items and isinstance(sub_items[0], dict):
-                    first = sub_items[0]
-                    entry["_first_item"] = {k: v for k, v in first.items() if k != "items"}
-                    entry["_first_item"]["_keys"] = list(first.keys())
-                    inner = first.get("items", [])
-                    entry["_first_item"]["_items_count"] = len(inner)
-                    if inner and isinstance(inner[0], dict):
-                        entry["_first_item"]["_first_inner"] = {k: v for k, v in inner[0].items() if k != "items"}
-                        entry["_first_item"]["_first_inner"]["_keys"] = list(inner[0].keys())
-                sample.append(entry)
-        return {"categories": [], "_debug_raw_sample": sample, "_raw_count": len(raw), "_raw_type": type(raw).__name__}
-    return result
 
 
 # ── Product detail ────────────────────────────────────────────────────────────
