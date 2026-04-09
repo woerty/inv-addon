@@ -1,6 +1,7 @@
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { NotificationProvider } from "./components/NotificationProvider";
 import Navbar from "./components/Navbar";
+import DashboardPage from "./pages/DashboardPage";
 import InventoryPage from "./pages/InventoryPage";
 import ScanPage from "./pages/ScanPage";
 import ScanStationPage from "./pages/ScanStationPage";
@@ -18,7 +19,8 @@ const AppContent = () => {
     <>
       {!hideNavbar && <Navbar />}
       <Routes>
-        <Route path="/" element={<InventoryPage />} />
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/scan" element={<ScanPage />} />
         <Route path="/scan-station" element={<ScanStationPage />} />
         <Route path="/recipes" element={<RecipesPage />} />

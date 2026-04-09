@@ -12,6 +12,7 @@ import {
   Typography,
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
+import DashboardIcon from "@mui/icons-material/Dashboard";
 import InventoryIcon from "@mui/icons-material/Inventory2";
 import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
 import CropFreeIcon from "@mui/icons-material/CropFree";
@@ -24,7 +25,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { usePicnicStatus } from "../hooks/usePicnic";
 
 const NAV_ITEMS = [
-  { path: "/", label: "Inventar", icon: <InventoryIcon /> },
+  { path: "/", label: "Dashboard", icon: <DashboardIcon /> },
+  { path: "/inventory", label: "Inventar", icon: <InventoryIcon /> },
   { path: "/scan", label: "Scannen", icon: <QrCodeScannerIcon /> },
   { path: "/scan-station", label: "Scan-Station", icon: <CropFreeIcon /> },
   { path: "/recipes", label: "Rezepte", icon: <RestaurantIcon /> },
