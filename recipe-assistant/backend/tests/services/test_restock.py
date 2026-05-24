@@ -117,6 +117,74 @@ async def test_below_threshold_skips_if_enough_in_cart(db: AsyncSession):
     assert client.added_products == []
 
 
+def _seed_pending_delivery(client: FakePicnicClient, picnic_id: str, qty: int) -> None:
+    """Inject a non-completed delivery containing `qty` of `picnic_id`."""
+    client.deliveries_summary = [
+        {
+            "id": "del-pending-1",
+            "delivery_id": "del-pending-1",
+            "status": "DELIVERING",
+            "delivery_time": {
+                "start": "2026-06-01T10:00:00+00:00",
+                "end": "2026-06-01T10:30:00+00:00",
+            },
+        }
+    ]
+    client.delivery_details = {
+        "del-pending-1": {
+            "delivery_id": "del-pending-1",
+            "status": "DELIVERING",
+            "delivery_time": {
+                "start": "2026-06-01T10:00:00+00:00",
+                "end": "2026-06-01T10:30:00+00:00",
+            },
+            "orders": [
+                {
+                    "items": [
+                        {
+                            "id": "order-line-1",
+                            "items": [
+                                {"id": picnic_id, "name": "x", "image_id": None}
+                            ],
+                            "decorators": [{"quantity": qty}],
+                        }
+                    ]
+                }
+            ],
+        }
+    }
+
+
+async def test_below_threshold_deducts_on_order_quantity(db: AsyncSession):
+    """Items already on the way home shouldn't trigger another order."""
+    await _seed_tracked(db, barcode="b1", picnic_id="s100", min_quantity=2, target_quantity=5)
+    client = FakePicnicClient()
+    _seed_pending_delivery(client, "s100", qty=3)
+
+    result = await check_and_enqueue(
+        db, barcode="b1", new_quantity=0, picnic_client=client
+    )
+
+    assert result is not None
+    # needed=5, on_order=3, cart=0 → delta=2
+    assert result.added_quantity == 2
+    assert client.added_products == [("s100", 2)]
+
+
+async def test_below_threshold_skips_when_full_amount_on_order(db: AsyncSession):
+    """If the full target quantity is already in a pending delivery, skip."""
+    await _seed_tracked(db, barcode="b1", picnic_id="s100", min_quantity=2, target_quantity=5)
+    client = FakePicnicClient()
+    _seed_pending_delivery(client, "s100", qty=5)
+
+    result = await check_and_enqueue(
+        db, barcode="b1", new_quantity=0, picnic_client=client
+    )
+
+    assert result is None
+    assert client.added_products == []
+
+
 async def test_restock_writes_inventory_log(db: AsyncSession):
     await _seed_tracked(db, barcode="b1", picnic_id="s100", min_quantity=2, target_quantity=5)
     client = FakePicnicClient()

@@ -629,6 +629,15 @@ async def delete_item(
 
     await _log_action(db, barcode, "delete")
     await db.delete(item)
+    # Inventory dropped to zero: if a TrackedProduct rule exists, refill
+    # the Picnic cart. Without this the explicit-delete path silently
+    # bypassed auto-restock that scan-out-to-zero would have triggered.
+    await check_and_enqueue(
+        db,
+        barcode=barcode,
+        new_quantity=0,
+        picnic_client=await _opt_picnic_client(),
+    )
     await db.commit()
     return {"message": f"Artikel mit Barcode {barcode} wurde gelöscht."}
 
@@ -681,6 +690,7 @@ async def import_data(db: AsyncSession = Depends(get_db), file: UploadFile = ...
         raise HTTPException(status_code=400, detail="Ungültige JSON Datei")
 
     imported_count = 0
+    imported_barcodes: list[tuple[str, int]] = []  # (barcode, post-import qty)
 
     # Import storage locations
     for loc_name in data.get("storage_locations", []):
@@ -727,16 +737,29 @@ async def import_data(db: AsyncSession = Depends(get_db), file: UploadFile = ...
             existing.category = item_data.get("category", existing.category)
             existing.storage_location_id = location_id
             existing.expiration_date = exp_date
+            imported_barcodes.append((existing.barcode, existing.quantity))
         else:
+            new_qty = item_data.get("quantity", 1)
             db.add(InventoryItem(
                 barcode=item_data["barcode"],
                 name=item_data.get("name", "Unbekannt"),
-                quantity=item_data.get("quantity", 1),
+                quantity=new_qty,
                 category=item_data.get("category", "Unbekannt"),
                 storage_location_id=location_id,
                 expiration_date=exp_date,
             ))
+            imported_barcodes.append((item_data["barcode"], new_qty))
         imported_count += 1
+
+    # Tracked-product rules survive backup/restore but the import overwrote
+    # quantities without going through _apply_decrement, so the auto-restock
+    # trigger was never fired. Re-check each imported barcode against its
+    # rule so anything that ended up below threshold gets queued.
+    picnic = await _opt_picnic_client()
+    for barcode, qty in imported_barcodes:
+        await check_and_enqueue(
+            db, barcode=barcode, new_quantity=qty, picnic_client=picnic
+        )
 
     await db.commit()
     return {"message": f"{imported_count} Artikel importiert."}
