@@ -12,6 +12,8 @@ addition). The tests verify:
     client is available.
 """
 
+from unittest.mock import AsyncMock
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -158,3 +160,77 @@ async def test_scan_in_into_zombie_revives_row(client: AsyncClient):
     row = await _inventory_row("b1")
     assert row is not None
     assert row.quantity == 1  # zombie revived, not recreated
+
+
+@pytest.mark.asyncio
+async def test_delete_endpoint_triggers_restock_check(client: AsyncClient, monkeypatch):
+    """DELETE /{barcode} on a tracked product must fire check_and_enqueue with
+    new_quantity=0 — without this fix, explicit-delete bypassed auto-restock.
+    """
+    from tests.fixtures.picnic.fake_client import FakePicnicClient
+
+    fake = FakePicnicClient()
+    monkeypatch.setattr(
+        "app.routers.inventory._opt_picnic_client",
+        AsyncMock(return_value=fake),
+    )
+
+    await _seed(barcode="b1", quantity=1)  # tracked: min=2, target=5
+
+    response = await client.delete("/api/inventory/b1")
+    assert response.status_code == 200
+
+    # Inventory row gone (explicit delete intent preserved)
+    assert await _inventory_row("b1") is None
+    # Picnic cart got the target quantity
+    assert fake.added_products == [("s100", 5)]
+
+
+@pytest.mark.asyncio
+async def test_delete_endpoint_without_tracked_rule_no_restock(client: AsyncClient, monkeypatch):
+    """Untracked deletes don't touch the cart."""
+    from tests.fixtures.picnic.fake_client import FakePicnicClient
+
+    fake = FakePicnicClient()
+    monkeypatch.setattr(
+        "app.routers.inventory._opt_picnic_client",
+        AsyncMock(return_value=fake),
+    )
+
+    await _seed(barcode="b2", quantity=1, tracked=False)
+
+    response = await client.delete("/api/inventory/b2")
+    assert response.status_code == 200
+    assert fake.added_products == []
+
+
+@pytest.mark.asyncio
+async def test_json_import_below_threshold_triggers_restock(client: AsyncClient, monkeypatch):
+    """JSON import overwriting quantity below threshold must trigger restock."""
+    import io
+    import json
+
+    from tests.fixtures.picnic.fake_client import FakePicnicClient
+
+    fake = FakePicnicClient()
+    monkeypatch.setattr(
+        "app.routers.inventory._opt_picnic_client",
+        AsyncMock(return_value=fake),
+    )
+
+    # Seed: tracked product (min=2, target=5) with current quantity 5 (at target)
+    await _seed(barcode="b1", quantity=5)
+
+    # Backup file lowers quantity to 1 → below threshold
+    payload = {
+        "version": "2.0",
+        "inventory": [{"barcode": "b1", "name": "Milch", "quantity": 1}],
+        "storage_locations": [],
+        "persons": [],
+    }
+    files = {"file": ("backup.json", io.BytesIO(json.dumps(payload).encode()), "application/json")}
+    response = await client.post("/api/inventory/import", files=files)
+    assert response.status_code == 200
+
+    # needed = 5 - 1 = 4
+    assert fake.added_products == [("s100", 4)]

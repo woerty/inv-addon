@@ -15,6 +15,7 @@ from app.models.log import InventoryLog
 from app.models.tracked_product import TrackedProduct
 from app.services.picnic.cart import _parse_cart_quantities
 from app.services.picnic.client import PicnicClientProtocol
+from app.services.picnic.orders import parse_pending_orders
 
 log = logging.getLogger("restock")
 
@@ -69,7 +70,8 @@ async def check_and_enqueue(
     if needed <= 0:
         return None
 
-    # Check what's already in cart to avoid over-ordering (dedup)
+    # Dedup against the current cart so we don't pile up duplicates on
+    # repeated decrements between a refill and a checkout.
     already_in_cart = 0
     try:
         raw_cart = await picnic_client.get_cart()
@@ -78,13 +80,23 @@ async def check_and_enqueue(
     except Exception:
         log.warning("Failed to fetch cart for restock dedup, proceeding anyway")
 
-    delta = needed - already_in_cart
+    # Also dedup against pending deliveries: stock that's already on its
+    # way home shouldn't trigger another order.
+    on_order = 0
+    try:
+        pending = await parse_pending_orders(picnic_client)
+        on_order = pending.quantity_map.get(tracked.picnic_id, 0)
+    except Exception:
+        log.warning("Failed to fetch pending orders for restock dedup, proceeding anyway")
+
+    delta = needed - already_in_cart - on_order
     if delta <= 0:
         log.info(
-            "Restock skip %s: need %d, already %d in cart",
+            "Restock skip %s: need %d, already %d in cart, %d on order",
             barcode,
             needed,
             already_in_cart,
+            on_order,
         )
         return None
 
@@ -104,10 +116,11 @@ async def check_and_enqueue(
     )
 
     log.info(
-        "Restock %s: added %d to Picnic cart (was %d in cart, need %d)",
+        "Restock %s: added %d to Picnic cart (was %d in cart, %d on order, need %d)",
         barcode,
         delta,
         already_in_cart,
+        on_order,
         needed,
     )
     return RestockResult(barcode=barcode, added_quantity=delta)
