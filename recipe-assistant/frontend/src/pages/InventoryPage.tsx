@@ -3,7 +3,12 @@ import { useNavigate } from "react-router-dom";
 import {
   Box,
   Button,
+  Checkbox,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Paper,
   Table,
   TableBody,
@@ -20,10 +25,12 @@ import FileUploadIcon from "@mui/icons-material/FileUpload";
 import ImageSearchIcon from "@mui/icons-material/ImageSearch";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import LocalGroceryStoreIcon from "@mui/icons-material/LocalGroceryStore";
+import PrintIcon from "@mui/icons-material/Print";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import { IconButton } from "@mui/material";
 import { useInventory } from "../hooks/useInventory";
 import { useNotification } from "../components/NotificationProvider";
-import { exportData, importData, relookupBarcode, relookupAllUnknown, backfillImages } from "../api/client";
+import { exportData, importData, relookupBarcode, relookupAllUnknown, backfillImages, barcodeSheetUrl } from "../api/client";
 import { usePicnicStatus } from "../hooks/usePicnic";
 import { usePicnicPendingOrders } from "../hooks/usePicnicOrders";
 import { useTrackedProducts } from "../hooks/useTrackedProducts";
@@ -67,6 +74,37 @@ const InventoryPage = () => {
   const [trackedFormExisting, setTrackedFormExisting] = useState<
     TrackedProduct | undefined
   >(undefined);
+
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customName, setCustomName] = useState("");
+  const [customCategory, setCustomCategory] = useState("");
+  const [customLocation, setCustomLocation] = useState("");
+
+  const handleCreateCustom = async () => {
+    if (!customName.trim()) return;
+    try {
+      await inventory.createCustom({
+        name: customName.trim(),
+        category: customCategory.trim() || undefined,
+        storage_location: customLocation.trim() || undefined,
+      });
+      notify(`Eigenes Produkt "${customName.trim()}" angelegt`, "success");
+      setCustomOpen(false);
+      setCustomName("");
+      setCustomCategory("");
+      setCustomLocation("");
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Fehler beim Anlegen", "error");
+    }
+  };
+
+  const handleToggleSheet = async (barcode: string, value: boolean) => {
+    try {
+      await inventory.update(barcode, { include_in_sheet: value });
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Fehler", "error");
+    }
+  };
 
   const openTrackedForm = (barcode: string, existing?: TrackedProduct) => {
     setTrackedFormBarcode(barcode);
@@ -242,6 +280,25 @@ const InventoryPage = () => {
           hidden
           onChange={handleImport}
         />
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<AddCircleOutlineIcon />}
+          onClick={() => setCustomOpen(true)}
+        >
+          Eigenes Produkt anlegen
+        </Button>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<PrintIcon />}
+          component="a"
+          href={barcodeSheetUrl()}
+          target="_blank"
+          rel="noopener"
+        >
+          Barcode-Blatt herunterladen
+        </Button>
         {items.some((i) => i.name === "Unbekanntes Produkt") && (
           <Button
             variant="outlined"
@@ -299,6 +356,7 @@ const InventoryPage = () => {
               ))}
               <TableCell>Lagerort</TableCell>
               <TableCell>Ablaufdatum</TableCell>
+              <TableCell>Auf PDF</TableCell>
               <TableCell>Aktionen</TableCell>
               <TableCell>Nachbest.</TableCell>
             </TableRow>
@@ -389,6 +447,12 @@ const InventoryPage = () => {
                     }
                   />
                 </TableCell>
+                <TableCell>
+                  <Checkbox
+                    checked={item.include_in_sheet}
+                    onChange={(e) => handleToggleSheet(item.barcode, e.target.checked)}
+                  />
+                </TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>
                   <Button
                     variant="contained"
@@ -424,7 +488,7 @@ const InventoryPage = () => {
             ))}
             {!loading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} align="center">
+                <TableCell colSpan={9} align="center">
                   Keine Artikel gefunden.
                 </TableCell>
               </TableRow>
@@ -432,6 +496,39 @@ const InventoryPage = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      <Dialog open={customOpen} onClose={() => setCustomOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Eigenes Produkt anlegen</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            label="Name"
+            fullWidth
+            margin="normal"
+            value={customName}
+            onChange={(e) => setCustomName(e.target.value)}
+          />
+          <TextField
+            label="Kategorie (optional)"
+            fullWidth
+            margin="normal"
+            value={customCategory}
+            onChange={(e) => setCustomCategory(e.target.value)}
+          />
+          <TextField
+            label="Lagerort (optional)"
+            fullWidth
+            margin="normal"
+            value={customLocation}
+            onChange={(e) => setCustomLocation(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCustomOpen(false)}>Abbrechen</Button>
+          <Button variant="contained" onClick={handleCreateCustom} disabled={!customName.trim()}>
+            Anlegen
+          </Button>
+        </DialogActions>
+      </Dialog>
       <TrackedProductForm
         open={trackedFormOpen}
         mode={trackedFormExisting ? "edit" : "create"}
