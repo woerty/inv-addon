@@ -12,6 +12,7 @@ export interface InventoryItem {
   storage_location: StorageLocation | null;
   expiration_date: string | null;
   image_url: string | null;
+  include_in_sheet: boolean;
   added_date: string;
   updated_date: string;
 }

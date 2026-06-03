@@ -26,6 +26,7 @@ class InventoryItemResponse(BaseModel):
     expiration_date: date | None = None
     image_url: str | None = None
     is_pinned: bool = False
+    include_in_sheet: bool = False
     added_date: datetime
     updated_date: datetime
 
@@ -46,6 +47,7 @@ class InventoryUpdateRequest(BaseModel):
     quantity: int | None = None
     storage_location: str | None = None
     expiration_date: date | None = None
+    include_in_sheet: bool | None = None
 
 
 class ScanOutRequest(BaseModel):
@@ -55,3 +57,10 @@ class ScanOutRequest(BaseModel):
 class ScanInRequest(BaseModel):
     barcode: str
     storage_location_id: int | None = None
+
+
+class CustomProductCreate(BaseModel):
+    name: str
+    category: str | None = None
+    storage_location: str | None = None
+    quantity: int = 0

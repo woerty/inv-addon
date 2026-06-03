@@ -6,6 +6,7 @@ import {
   deleteItem,
   addItemByBarcode,
   removeItemByBarcode,
+  createCustomProduct,
 } from "../api/client";
 
 export function useInventory() {
@@ -67,5 +68,11 @@ export function useInventory() {
     return result;
   };
 
-  return { items, loading, error, refetch: fetch, add, remove, update, delete: del };
+  const createCustom = async (data: Parameters<typeof createCustomProduct>[0]) => {
+    const result = await createCustomProduct(data);
+    await fetch();
+    return result;
+  };
+
+  return { items, loading, error, refetch: fetch, add, remove, update, delete: del, createCustom };
 }

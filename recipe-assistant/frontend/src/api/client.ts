@@ -87,11 +87,25 @@ export const updateItem = (barcode: string, data: {
   quantity?: number;
   storage_location?: string;
   expiration_date?: string;
+  include_in_sheet?: boolean;
 }) =>
   request<{ message: string }>(`/inventory/${barcode}`, {
     method: "PUT",
     body: JSON.stringify(data),
   });
+
+export const createCustomProduct = (data: {
+  name: string;
+  category?: string;
+  storage_location?: string;
+  quantity?: number;
+}) =>
+  request<InventoryItem>("/inventory/custom", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+export const barcodeSheetUrl = () => `${BASE}/inventory/barcode-sheet.pdf`;
 
 export const deleteItem = (barcode: string) =>
   request<{ message: string }>(`/inventory/${barcode}`, { method: "DELETE" });

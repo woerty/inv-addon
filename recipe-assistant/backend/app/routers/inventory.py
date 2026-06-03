@@ -5,7 +5,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,12 +20,15 @@ from app.models.tracked_product import TrackedProduct
 from app.schemas.inventory import (
     BarcodeAddRequest,
     BarcodeRemoveRequest,
+    CustomProductCreate,
     InventoryItemResponse,
     InventoryUpdateRequest,
     ScanInRequest,
     ScanOutRequest,
 )
 from app.services.barcode import lookup_barcode
+from app.services.barcode_sheet import render_barcode_sheet
+from app.services.custom_products import is_custom_barcode, make_custom_barcode
 from app.services.picnic.catalog import PicnicProductData, upsert_product
 from app.services.picnic.client import PicnicClientProtocol, get_picnic_client
 from app.services.restock import check_and_enqueue
@@ -86,7 +89,7 @@ async def _apply_decrement(
         )
     ).scalar_one_or_none()
 
-    if new_quantity <= 0 and tracked is None:
+    if new_quantity <= 0 and tracked is None and not is_custom_barcode(item.barcode):
         await _log_action(db, item.barcode, action, log_details)
         await db.delete(item)
         return True
@@ -150,6 +153,23 @@ async def get_inventory(
         # else: item.image_url is already set from the DB column (OFF, etc.)
 
     return items
+
+
+@router.get("/barcode-sheet.pdf")
+async def barcode_sheet(db: AsyncSession = Depends(get_db)):
+    """Return a printable A4 PDF of Code128 barcodes for flagged items."""
+    result = await db.execute(
+        select(InventoryItem)
+        .where(InventoryItem.include_in_sheet.is_(True))
+        .order_by(InventoryItem.name)
+    )
+    items = result.scalars().all()
+    pdf = render_barcode_sheet([(i.barcode, i.name) for i in items])
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=barcode-blatt.pdf"},
+    )
 
 
 @router.post("/relookup/{barcode}")
@@ -324,14 +344,41 @@ async def backfill_images(
     }
 
 
+@router.post("/custom", status_code=201, response_model=InventoryItemResponse)
+async def create_custom_product(
+    req: CustomProductCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a user-defined product with an auto-assigned EIGEN- barcode.
+
+    No external barcode lookup: name/category come straight from the user.
+    """
+    barcode = make_custom_barcode()
+    location_id = await _resolve_storage_location(db, req.storage_location)
+    item = InventoryItem(
+        barcode=barcode,
+        name=req.name,
+        quantity=req.quantity,
+        category=req.category or "Eigene Produkte",
+        storage_location_id=location_id,
+    )
+    db.add(item)
+    await _log_action(db, barcode, "create-custom", f"name: {req.name}")
+    await db.commit()
+
+    result = await db.execute(
+        select(InventoryItem)
+        .options(selectinload(InventoryItem.storage_location))
+        .where(InventoryItem.barcode == barcode)
+    )
+    return result.scalar_one()
+
+
 @router.post("/barcode", status_code=201)
 async def add_item_by_barcode(
     req: BarcodeAddRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    product = await lookup_barcode(req.barcode)
-    location_id = await _resolve_storage_location(db, req.storage_location)
-
     result = await db.execute(
         select(InventoryItem).where(InventoryItem.barcode == req.barcode)
     )
@@ -342,6 +389,15 @@ async def add_item_by_barcode(
         await _log_action(db, req.barcode, "add", f"quantity: {existing.quantity - 1} → {existing.quantity}")
         await db.commit()
         return {"message": f'Produkt "{existing.name}" existierte bereits. Menge um 1 erhöht.'}
+
+    if is_custom_barcode(req.barcode):
+        raise HTTPException(
+            status_code=404,
+            detail="Unbekanntes eigenes Produkt — bitte erst anlegen",
+        )
+
+    product = await lookup_barcode(req.barcode)
+    location_id = await _resolve_storage_location(db, req.storage_location)
 
     item = InventoryItem(
         barcode=req.barcode,
@@ -539,6 +595,18 @@ async def scan_in(
             "created": False,
         }
 
+    # Custom (EIGEN-) products are never auto-created via scan: they must be
+    # defined in the UI first. Skip the external lookup entirely.
+    if is_custom_barcode(req.barcode):
+        return JSONResponse(
+            status_code=404,
+            content={
+                "status": "unknown_custom_product",
+                "barcode": req.barcode,
+                "error": "Unbekanntes eigenes Produkt — bitte erst anlegen",
+            },
+        )
+
     # New item — resolve product details via the normal lookup pipeline.
     # Unknown barcodes become "Unbekanntes Produkt" and still return 200;
     # the user can clean them up later via the web UI.
@@ -610,6 +678,9 @@ async def update_item(
 
     if req.expiration_date is not None:
         item.expiration_date = req.expiration_date
+
+    if req.include_in_sheet is not None:
+        item.include_in_sheet = req.include_in_sheet
 
     await db.commit()
     return {"message": f"Artikel mit Barcode {barcode} aktualisiert."}

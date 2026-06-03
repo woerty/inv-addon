@@ -29,6 +29,9 @@ class InventoryItem(Base):
         Integer, ForeignKey("storage_locations.id", ondelete="SET NULL"), nullable=True
     )
     image_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    include_in_sheet: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     is_pinned: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
