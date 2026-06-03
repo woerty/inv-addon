@@ -41,7 +41,8 @@ RUN pip install --no-cache-dir \
     "openai>=1.60.0" \
     "python-multipart>=0.0.18" \
     "python-picnic-api2>=1.3.3" \
-    "rapidfuzz>=3.10.0"
+    "rapidfuzz>=3.10.0" \
+    "reportlab>=4.2.0"
 
 # Copy backend
 COPY backend/ ./backend/
