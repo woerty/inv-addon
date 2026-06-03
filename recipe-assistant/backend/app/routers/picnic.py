@@ -335,8 +335,15 @@ async def debug_raw_offers(
     # the tiers are structured. Pass ?article=<picnic_id>.
     if article and hasattr(client, "_call"):
         try:
+            # Mirror the library's get_article call: the product-details page
+            # requires the Picnic headers and the show_category_action param,
+            # otherwise it returns a non-JSON error body.
+            path = (
+                f"/pages/product-details-page-root?id={article}"
+                "&show_category_action=true"
+            )
             raw_article = await client._call(  # type: ignore[attr-defined]
-                "_get", f"/pages/product-details-page-root?id={article}"
+                "_get", path, add_picnic_headers=True
             )
             result["article_raw"] = raw_article
         except Exception as e:  # pragma: no cover - debug aid
