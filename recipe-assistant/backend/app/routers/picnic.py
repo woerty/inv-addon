@@ -19,6 +19,7 @@ Tests swap the Picnic client by overriding the get_picnic_client dependency:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -267,6 +268,46 @@ async def search(
             )
     await db.commit()
     return PicnicSearchResponse(results=results)
+
+
+@router.get("/debug/raw-offers")
+async def debug_raw_offers(
+    q: str | None = None,
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+):
+    """Debug: dump raw Picnic search + cart payloads, unfiltered.
+
+    Investigation aid for bundle/offer detection. Picnic returns promotions as
+    typed entries in each item's ``decorators`` array, which our normal parsing
+    drops (we only read ``type == "QUANTITY"``). This endpoint returns the raw,
+    unparsed JSON so we can see the real promo/bundle structure before building
+    detection + display.
+
+    Pass ``?q=<product>`` with something that is currently on offer. The
+    response includes the full raw search payload plus a convenience
+    ``search_decorators`` view that surfaces just the decorators per item.
+    """
+    _require_enabled()
+    result: dict[str, Any] = {}
+
+    if q:
+        raw_search = await client.search(q)
+        result["search"] = {"query": q, "raw": raw_search}
+        surfaced: list[dict[str, Any]] = []
+        for group in raw_search:
+            for item in group.get("items", []):
+                surfaced.append(
+                    {
+                        "id": item.get("id"),
+                        "name": item.get("name"),
+                        "display_price": item.get("display_price"),
+                        "decorators": item.get("decorators"),
+                    }
+                )
+        result["search_decorators"] = surfaced
+
+    result["cart_raw"] = await client.get_cart()
+    return result
 
 
 @router.get("/cache", response_model=list[PicnicProductCacheEntry])

@@ -108,3 +108,38 @@ async def test_get_pending_orders(client, override_picnic_client):
     assert "quantity_map" in data
 
 
+async def test_debug_raw_offers_surfaces_decorators(client, override_picnic_client):
+    fake = override_picnic_client
+    fake.search_results["angebot"] = [
+        {
+            "items": [
+                {
+                    "id": "s1",
+                    "name": "Angebotsprodukt",
+                    "display_price": 199,
+                    "decorators": [{"type": "PROMO", "text": "2 für 3,00"}],
+                }
+            ]
+        }
+    ]
+    resp = await client.get("/api/picnic/debug/raw-offers?q=angebot")
+    assert resp.status_code == 200
+    data = resp.json()
+    # raw, unfiltered passthrough is preserved
+    assert data["search"]["raw"][0]["items"][0]["id"] == "s1"
+    # convenience view surfaces the decorators we'd otherwise drop
+    surfaced = data["search_decorators"][0]
+    assert surfaced["decorators"][0]["type"] == "PROMO"
+    assert surfaced["decorators"][0]["text"] == "2 für 3,00"
+    # cart is always dumped raw too
+    assert "cart_raw" in data
+
+
+async def test_debug_raw_offers_without_query_dumps_cart_only(client, override_picnic_client):
+    resp = await client.get("/api/picnic/debug/raw-offers")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "cart_raw" in data
+    assert "search" not in data
+
+
