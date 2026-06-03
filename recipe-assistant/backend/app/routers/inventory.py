@@ -5,7 +5,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -27,6 +27,7 @@ from app.schemas.inventory import (
     ScanOutRequest,
 )
 from app.services.barcode import lookup_barcode
+from app.services.barcode_sheet import render_barcode_sheet
 from app.services.custom_products import is_custom_barcode, make_custom_barcode
 from app.services.picnic.catalog import PicnicProductData, upsert_product
 from app.services.picnic.client import PicnicClientProtocol, get_picnic_client
@@ -152,6 +153,23 @@ async def get_inventory(
         # else: item.image_url is already set from the DB column (OFF, etc.)
 
     return items
+
+
+@router.get("/barcode-sheet.pdf")
+async def barcode_sheet(db: AsyncSession = Depends(get_db)):
+    """Return a printable A4 PDF of Code128 barcodes for flagged items."""
+    result = await db.execute(
+        select(InventoryItem)
+        .where(InventoryItem.include_in_sheet.is_(True))
+        .order_by(InventoryItem.name)
+    )
+    items = result.scalars().all()
+    pdf = render_barcode_sheet([(i.barcode, i.name) for i in items])
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=barcode-blatt.pdf"},
+    )
 
 
 @router.post("/relookup/{barcode}")
