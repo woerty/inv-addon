@@ -361,9 +361,6 @@ async def add_item_by_barcode(
     req: BarcodeAddRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    product = await lookup_barcode(req.barcode)
-    location_id = await _resolve_storage_location(db, req.storage_location)
-
     result = await db.execute(
         select(InventoryItem).where(InventoryItem.barcode == req.barcode)
     )
@@ -374,6 +371,15 @@ async def add_item_by_barcode(
         await _log_action(db, req.barcode, "add", f"quantity: {existing.quantity - 1} → {existing.quantity}")
         await db.commit()
         return {"message": f'Produkt "{existing.name}" existierte bereits. Menge um 1 erhöht.'}
+
+    if is_custom_barcode(req.barcode):
+        raise HTTPException(
+            status_code=404,
+            detail="Unbekanntes eigenes Produkt — bitte erst anlegen",
+        )
+
+    product = await lookup_barcode(req.barcode)
+    location_id = await _resolve_storage_location(db, req.storage_location)
 
     item = InventoryItem(
         barcode=req.barcode,
@@ -570,6 +576,18 @@ async def scan_in(
             "storage_location": loc_data,
             "created": False,
         }
+
+    # Custom (EIGEN-) products are never auto-created via scan: they must be
+    # defined in the UI first. Skip the external lookup entirely.
+    if is_custom_barcode(req.barcode):
+        return JSONResponse(
+            status_code=404,
+            content={
+                "status": "unknown_custom_product",
+                "barcode": req.barcode,
+                "error": "Unbekanntes eigenes Produkt — bitte erst anlegen",
+            },
+        )
 
     # New item — resolve product details via the normal lookup pipeline.
     # Unknown barcodes become "Unbekanntes Produkt" and still return 200;

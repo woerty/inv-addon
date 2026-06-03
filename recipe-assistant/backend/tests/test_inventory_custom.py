@@ -24,3 +24,30 @@ async def test_custom_product_appears_in_inventory(client):
     listing = await client.get("/api/inventory/")
     names = [i["name"] for i in listing.json()]
     assert "Gurke" in names
+
+
+async def test_scan_in_existing_custom_product_increments_without_lookup(client):
+    created = (await client.post("/api/inventory/custom", json={"name": "Banane"})).json()
+    barcode = created["barcode"]
+
+    resp = await client.post("/api/inventory/scan-in", json={"barcode": barcode})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["name"] == "Banane"  # NOT "Testprodukt" from the mock lookup
+    assert data["quantity"] == 1
+
+
+async def test_scan_in_unknown_custom_barcode_errors(client):
+    resp = await client.post(
+        "/api/inventory/scan-in", json={"barcode": "EIGEN-DEADBEEF0000"}
+    )
+    assert resp.status_code == 404
+    assert resp.json()["status"] == "unknown_custom_product"
+
+
+async def test_add_by_barcode_unknown_custom_errors(client):
+    resp = await client.post(
+        "/api/inventory/barcode", json={"barcode": "EIGEN-DEADBEEF0000"}
+    )
+    assert resp.status_code == 404
