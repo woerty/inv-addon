@@ -20,12 +20,14 @@ from app.models.tracked_product import TrackedProduct
 from app.schemas.inventory import (
     BarcodeAddRequest,
     BarcodeRemoveRequest,
+    CustomProductCreate,
     InventoryItemResponse,
     InventoryUpdateRequest,
     ScanInRequest,
     ScanOutRequest,
 )
 from app.services.barcode import lookup_barcode
+from app.services.custom_products import is_custom_barcode, make_custom_barcode
 from app.services.picnic.catalog import PicnicProductData, upsert_product
 from app.services.picnic.client import PicnicClientProtocol, get_picnic_client
 from app.services.restock import check_and_enqueue
@@ -322,6 +324,36 @@ async def backfill_images(
         "updated": total_updated,
         "diagnostics": diag,
     }
+
+
+@router.post("/custom", status_code=201, response_model=InventoryItemResponse)
+async def create_custom_product(
+    req: CustomProductCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a user-defined product with an auto-assigned EIGEN- barcode.
+
+    No external barcode lookup: name/category come straight from the user.
+    """
+    barcode = make_custom_barcode()
+    location_id = await _resolve_storage_location(db, req.storage_location)
+    item = InventoryItem(
+        barcode=barcode,
+        name=req.name,
+        quantity=req.quantity,
+        category=req.category or "Eigene Produkte",
+        storage_location_id=location_id,
+    )
+    db.add(item)
+    await _log_action(db, barcode, "create-custom", f"name: {req.name}")
+    await db.commit()
+
+    result = await db.execute(
+        select(InventoryItem)
+        .options(selectinload(InventoryItem.storage_location))
+        .where(InventoryItem.barcode == barcode)
+    )
+    return result.scalar_one()
 
 
 @router.post("/barcode", status_code=201)
