@@ -143,3 +143,55 @@ async def test_debug_raw_offers_without_query_dumps_cart_only(client, override_p
     assert "search" not in data
 
 
+async def test_product_detail_includes_bundle_tiers(client, override_picnic_client):
+    fake = override_picnic_client
+    fake.product_pages["s1026031"] = {
+        "body": {"child": {"child": {"children": [
+            {
+                "id": "product-page-bundles-1",
+                "type": "BLOCK",
+                "children": [
+                    {
+                        "id": "s1026031",
+                        "child": {
+                            "content": {"type": "SELLING_UNIT_TILE", "sellingUnit": {"id": "s1026031"}},
+                            "pml": {"component": {"children": [
+                                {"type": "PRICE", "price": 199},
+                            ]}},
+                        },
+                    },
+                    {
+                        "id": "s1079386",
+                        "child": {
+                            "content": {"type": "SELLING_UNIT_TILE", "sellingUnit": {"id": "s1079386"}},
+                            "pml": {"component": {"children": [
+                                {"markdown": "#(#b40117)Spare 56 Cent#(#b40117)", "type": "RICH_TEXT"},
+                                {"markdown": "#(#b40117)4#(#b40117)", "type": "RICH_TEXT"},
+                                {"type": "ICON", "iconKey": "crossSmall"},
+                                {"type": "PRICE", "price": 185},
+                            ]}},
+                        },
+                    },
+                ],
+            }
+        ]}}}
+    }
+    resp = await client.get("/api/picnic/products/s1026031")
+    assert resp.status_code == 200
+    bundles = resp.json()["bundles"]
+    assert len(bundles) == 2
+    assert bundles[1] == {
+        "picnic_id": "s1079386",
+        "quantity": 4,
+        "unit_price_cents": 185,
+        "total_price_cents": 740,
+        "savings_text": "Spare 56 Cent",
+    }
+
+
+async def test_product_detail_without_bundles_is_empty(client, override_picnic_client):
+    resp = await client.get("/api/picnic/products/s9999")
+    assert resp.status_code == 200
+    assert resp.json()["bundles"] == []
+
+

@@ -168,6 +168,14 @@ class PendingOrdersResponse(BaseModel):
 
 # ── Product Detail ────────────────────────────────────────────────
 
+class BundleTier(BaseModel):
+    picnic_id: str
+    quantity: int
+    unit_price_cents: int | None = None
+    total_price_cents: int | None = None
+    savings_text: str | None = None
+
+
 class ProductDetailResponse(BaseModel):
     picnic_id: str
     name: str
@@ -179,6 +187,7 @@ class ProductDetailResponse(BaseModel):
     on_order: int = 0
     inventory_quantity: int = 0
     is_subscribed: bool = False
+    bundles: list[BundleTier] = []
 
 
 # ── Categories ────────────────────────────────────────────────────

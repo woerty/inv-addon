@@ -27,6 +27,7 @@ class PicnicClientProtocol(Protocol):
     async def clear_cart(self) -> dict[str, Any]: ...
     async def get_categories(self, depth: int = 0) -> list[dict[str, Any]]: ...
     async def get_article(self, article_id: str) -> dict[str, Any]: ...
+    async def get_product_page(self, picnic_id: str) -> dict[str, Any]: ...
 
 
 class PicnicNotConfigured(Exception):
@@ -219,6 +220,19 @@ class PicnicClient:
 
     async def get_article(self, article_id: str) -> dict[str, Any]:
         return await self._call("get_article", article_id)
+
+    async def get_product_page(self, picnic_id: str) -> dict[str, Any]:
+        """Fetch the raw product-details PML page.
+
+        Mirrors the library's get_article request (Picnic headers +
+        show_category_action), but returns the full unparsed page so callers
+        can extract data the library drops — e.g. the Bündel-Bonus tiers.
+        """
+        path = (
+            f"/pages/product-details-page-root?id={picnic_id}"
+            "&show_category_action=true"
+        )
+        return await self._call("_get", path, add_picnic_headers=True)
 
 
 # --- FastAPI dependency ---

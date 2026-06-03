@@ -29,6 +29,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models.picnic import PicnicProduct
 from app.schemas.picnic import (
+    BundleTier,
     CartModifyRequest,
     CartResponse,
     ImportCommitRequest,
@@ -46,6 +47,7 @@ from app.schemas.picnic import (
     PicnicStatusResponse,
     ProductDetailResponse,
 )
+from app.services.picnic.bundles import parse_bundles
 from app.services.picnic.cart import (
     _parse_cart_quantities,
     parse_cart_response,
@@ -333,19 +335,9 @@ async def debug_raw_offers(
     # in search results (`price_ranges` is null there) — it only appears on the
     # product-detail page. Dump the raw product-details PML so we can see how
     # the tiers are structured. Pass ?article=<picnic_id>.
-    if article and hasattr(client, "_call"):
+    if article:
         try:
-            # Mirror the library's get_article call: the product-details page
-            # requires the Picnic headers and the show_category_action param,
-            # otherwise it returns a non-JSON error body.
-            path = (
-                f"/pages/product-details-page-root?id={article}"
-                "&show_category_action=true"
-            )
-            raw_article = await client._call(  # type: ignore[attr-defined]
-                "_get", path, add_picnic_headers=True
-            )
-            result["article_raw"] = raw_article
+            result["article_raw"] = await client.get_product_page(article)
         except Exception as e:  # pragma: no cover - debug aid
             result["article_raw_error"] = str(e)
 
@@ -490,6 +482,15 @@ async def get_product_detail(
     image_id = article.get("image_id", cached.image_id if cached else None)
     price_cents = article.get("display_price", cached.last_price_cents if cached else None)
 
+    # Bündel-Bonus (quantity tiers) lives on the raw product-details page.
+    # Best-effort: never fail the whole detail view if this lookup breaks.
+    bundles: list[BundleTier] = []
+    try:
+        page = await client.get_product_page(picnic_id)
+        bundles = [BundleTier(**t) for t in parse_bundles(page)]
+    except Exception:
+        log.debug("bundle lookup failed for %s", picnic_id, exc_info=True)
+
     return ProductDetailResponse(
         picnic_id=picnic_id,
         name=name,
@@ -501,4 +502,5 @@ async def get_product_detail(
         on_order=on_order,
         inventory_quantity=inventory_quantity,
         is_subscribed=is_subscribed,
+        bundles=bundles,
     )

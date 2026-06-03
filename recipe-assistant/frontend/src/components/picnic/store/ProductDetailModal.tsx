@@ -83,6 +83,25 @@ export default function ProductDetailModal({
               {product.inventory_quantity > 0 && <Chip label={`${product.inventory_quantity} im Inventar`} color="success" />}
             </Stack>
             {product.description && <Typography variant="body2" color="text.secondary">{product.description}</Typography>}
+            {product.bundles.length > 1 && (
+              <Box sx={{ bgcolor: "#fafafa", borderRadius: 1, p: 1.5 }}>
+                <Typography variant="subtitle2" gutterBottom>Bündel-Bonus</Typography>
+                <Stack spacing={0.5}>
+                  {product.bundles.map((b) => (
+                    <Stack key={b.picnic_id} direction="row" alignItems="center" spacing={1}>
+                      <Typography variant="body2" sx={{ minWidth: 28, fontWeight: 600 }}>{b.quantity}×</Typography>
+                      <Typography variant="body2" color="text.secondary">{formatPrice(b.unit_price_cents)}/St.</Typography>
+                      {b.total_price_cents != null && (
+                        <Typography variant="body2">· {formatPrice(b.total_price_cents)}</Typography>
+                      )}
+                      {b.savings_text && (
+                        <Chip label={b.savings_text} size="small" color="error" sx={{ ml: "auto" }} />
+                      )}
+                    </Stack>
+                  ))}
+                </Stack>
+              </Box>
+            )}
             {product.in_cart > 0 ? (
               <Stack direction="row" alignItems="center" spacing={1} justifyContent="center">
                 <IconButton onClick={handleRemove} disabled={busy} color="primary"><RemoveIcon /></IconButton>

@@ -144,6 +144,14 @@ export interface PendingOrdersResponse {
 
 // ── Product Detail ────────────────────────────────────────────────
 
+export interface BundleTier {
+  picnic_id: string;
+  quantity: number;
+  unit_price_cents: number | null;
+  total_price_cents: number | null;
+  savings_text: string | null;
+}
+
 export interface ProductDetail {
   picnic_id: string;
   name: string;
@@ -155,6 +163,7 @@ export interface ProductDetail {
   on_order: number;
   inventory_quantity: number;
   is_subscribed: boolean;
+  bundles: BundleTier[];
 }
 
 // ── Categories ────────────────────────────────────────────────────

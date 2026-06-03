@@ -34,6 +34,8 @@ class FakePicnicClient:
         self.cart_items: dict[str, int] = {}
         self.categories: list[dict[str, Any]] = []
         self.articles: dict[str, dict[str, Any]] = {}
+        # picnic_id -> raw product-details page (for get_product_page)
+        self.product_pages: dict[str, dict[str, Any]] = {}
 
     async def search(self, query: str) -> list[dict[str, Any]]:
         return self.search_results.get(query.lower(), [])
@@ -88,6 +90,9 @@ class FakePicnicClient:
         if article_id in self.articles:
             return self.articles[article_id]
         raise Exception(f"Article {article_id} not found")
+
+    async def get_product_page(self, picnic_id: str) -> dict[str, Any]:
+        return self.product_pages.get(picnic_id, {})
 
 
 # Static conformance check: ensures FakePicnicClient stays in sync with
