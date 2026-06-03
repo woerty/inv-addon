@@ -661,6 +661,9 @@ async def update_item(
     if req.expiration_date is not None:
         item.expiration_date = req.expiration_date
 
+    if req.include_in_sheet is not None:
+        item.include_in_sheet = req.include_in_sheet
+
     await db.commit()
     return {"message": f"Artikel mit Barcode {barcode} aktualisiert."}
 

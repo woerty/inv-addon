@@ -71,3 +71,21 @@ async def test_real_product_still_deleted_at_zero(client):
     resp = await client.post("/api/inventory/scan-out", json={"barcode": "1234567890123"})
     assert resp.status_code == 200
     assert resp.json()["deleted"] is True
+
+
+async def test_toggle_include_in_sheet(client):
+    await client.post("/api/inventory/barcode", json={"barcode": "1234567890123"})
+
+    resp = await client.put(
+        "/api/inventory/1234567890123", json={"include_in_sheet": True}
+    )
+    assert resp.status_code == 200
+
+    listing = await client.get("/api/inventory/")
+    item = next(i for i in listing.json() if i["barcode"] == "1234567890123")
+    assert item["include_in_sheet"] is True
+
+    await client.put("/api/inventory/1234567890123", json={"include_in_sheet": False})
+    listing = await client.get("/api/inventory/")
+    item = next(i for i in listing.json() if i["barcode"] == "1234567890123")
+    assert item["include_in_sheet"] is False
