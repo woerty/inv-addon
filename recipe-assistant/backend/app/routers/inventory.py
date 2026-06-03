@@ -88,7 +88,7 @@ async def _apply_decrement(
         )
     ).scalar_one_or_none()
 
-    if new_quantity <= 0 and tracked is None:
+    if new_quantity <= 0 and tracked is None and not is_custom_barcode(item.barcode):
         await _log_action(db, item.barcode, action, log_details)
         await db.delete(item)
         return True

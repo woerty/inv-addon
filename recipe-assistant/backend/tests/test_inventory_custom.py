@@ -51,3 +51,23 @@ async def test_add_by_barcode_unknown_custom_errors(client):
         "/api/inventory/barcode", json={"barcode": "EIGEN-DEADBEEF0000"}
     )
     assert resp.status_code == 404
+
+
+async def test_custom_product_kept_as_zombie_at_zero(client):
+    created = (await client.post("/api/inventory/custom", json={"name": "Banane", "quantity": 1})).json()
+    barcode = created["barcode"]
+
+    resp = await client.post("/api/inventory/scan-out", json={"barcode": barcode})
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is False
+    assert resp.json()["remaining_quantity"] == 0
+
+    listing = await client.get("/api/inventory/")
+    assert any(i["barcode"] == barcode for i in listing.json())
+
+
+async def test_real_product_still_deleted_at_zero(client):
+    await client.post("/api/inventory/barcode", json={"barcode": "1234567890123"})
+    resp = await client.post("/api/inventory/scan-out", json={"barcode": "1234567890123"})
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
