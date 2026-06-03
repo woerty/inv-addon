@@ -273,6 +273,7 @@ async def search(
 @router.get("/debug/raw-offers")
 async def debug_raw_offers(
     q: str | None = None,
+    article: str | None = None,
     client: PicnicClientProtocol = Depends(get_picnic_client),
 ):
     """Debug: dump raw Picnic search + cart payloads, unfiltered.
@@ -327,6 +328,19 @@ async def debug_raw_offers(
                 result["search_tiles_full"] = tiles
             except Exception as e:  # pragma: no cover - debug aid
                 result["search_tiles_full_error"] = str(e)
+
+    # Quantity-tier pricing ("Mengenstaffel": 1x 1.99, 2x 1.95, 4x 1.89) is not
+    # in search results (`price_ranges` is null there) — it only appears on the
+    # product-detail page. Dump the raw product-details PML so we can see how
+    # the tiers are structured. Pass ?article=<picnic_id>.
+    if article and hasattr(client, "_call"):
+        try:
+            raw_article = await client._call(  # type: ignore[attr-defined]
+                "_get", f"/pages/product-details-page-root?id={article}"
+            )
+            result["article_raw"] = raw_article
+        except Exception as e:  # pragma: no cover - debug aid
+            result["article_raw_error"] = str(e)
 
     result["cart_raw"] = await client.get_cart()
     return result
