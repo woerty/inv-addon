@@ -306,6 +306,28 @@ async def debug_raw_offers(
                 )
         result["search_decorators"] = surfaced
 
+        # The library's search() strips each hit down to its `sellingUnit`
+        # object, discarding the rest of the search tile — where promo/offer
+        # badges (e.g. "4 für X€") live. Fetch the raw search-page PML and
+        # return the FULL SELLING_UNIT_TILE nodes so we can locate the promo
+        # field for browsable products. Best-effort: only the real client
+        # exposes `_call`; the test fake does not.
+        if hasattr(client, "_call"):
+            try:
+                from urllib.parse import quote
+
+                from python_picnic_api2.helper import find_nodes_by_content
+
+                path = f"/pages/search-page-results?search_term={quote(q)}"
+                raw_page = await client._call("_get", path)  # type: ignore[attr-defined]
+                body = raw_page.get("body", {}) if isinstance(raw_page, dict) else {}
+                tiles = find_nodes_by_content(
+                    body.get("child", {}), {"type": "SELLING_UNIT_TILE"}
+                )
+                result["search_tiles_full"] = tiles
+            except Exception as e:  # pragma: no cover - debug aid
+                result["search_tiles_full_error"] = str(e)
+
     result["cart_raw"] = await client.get_cart()
     return result
 
