@@ -84,7 +84,7 @@ export default function ProductDetailModal({
             </Stack>
             {product.description && <Typography variant="body2" color="text.secondary">{product.description}</Typography>}
             {product.bundles.length > 1 && (
-              <Box sx={{ bgcolor: "#fafafa", borderRadius: 1, p: 1.5 }}>
+              <Box sx={{ bgcolor: "action.hover", borderRadius: 1, p: 1.5 }}>
                 <Typography variant="subtitle2" gutterBottom>Bündel-Bonus</Typography>
                 <Stack spacing={0.5}>
                   {product.bundles.map((b) => (

@@ -105,7 +105,7 @@ const ScanPage = () => {
             mt: 1,
             mb: 1,
             p: 1.5,
-            bgcolor: "rgba(46, 125, 50, 0.08)",
+            bgcolor: "rgba(67, 160, 71, 0.18)",
             textAlign: "center",
           }}
         >

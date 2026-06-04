@@ -367,7 +367,7 @@ const InventoryPage = () => {
                 key={item.id}
                 sx={{
                   ...(item.quantity === 0 && {
-                    backgroundColor: "rgba(198, 40, 40, 0.04)",
+                    backgroundColor: "rgba(219, 68, 55, 0.14)",
                   }),
                 }}
               >

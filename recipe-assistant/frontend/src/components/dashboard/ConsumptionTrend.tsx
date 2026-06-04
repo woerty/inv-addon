@@ -2,6 +2,7 @@ import { Box, Paper, Typography } from "@mui/material";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { ConsumptionTrend as TrendData } from "../../types";
+import { useChartTheme } from "./useChartTheme";
 
 const COLORS = ["#5c6bc0", "#26a69a", "#ff9800", "#ef5350", "#ab47bc", "#42a5f5"];
 
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export default function ConsumptionTrend({ trend }: Props) {
+  const ct = useChartTheme();
   const chartData = trend.labels.map((label, i) => {
     const point: Record<string, number> = { time: new Date(label).getTime() };
     for (const s of trend.series) {
@@ -32,17 +34,25 @@ export default function ConsumptionTrend({ trend }: Props) {
       ) : (
         <ResponsiveContainer width="100%" height={250}>
           <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+            <CartesianGrid strokeDasharray="3 3" stroke={ct.lineStroke} />
             <XAxis
               dataKey="time"
               type="number"
               scale="time"
               domain={["dataMin", "dataMax"]}
               tickFormatter={formatDate}
-              tick={{ fontSize: 12 }}
+              tick={{ fontSize: 12, fill: ct.tickFill }}
+              axisLine={{ stroke: ct.lineStroke }}
+              tickLine={{ stroke: ct.lineStroke }}
             />
-            <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+            <YAxis
+              tick={{ fontSize: 12, fill: ct.tickFill }}
+              axisLine={{ stroke: ct.lineStroke }}
+              tickLine={{ stroke: ct.lineStroke }}
+              allowDecimals={false}
+            />
             <Tooltip
+              {...ct.tooltip}
               labelFormatter={(ts) => new Date(ts as number).toLocaleDateString("de-DE", {
                 weekday: "short", day: "numeric", month: "long",
               })}

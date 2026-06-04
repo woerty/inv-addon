@@ -66,7 +66,7 @@ const ChatPage = () => {
               sx={{
                 p: 1,
                 mb: 1,
-                bgcolor: msg.role === "user" ? "rgba(21, 101, 192, 0.08)" : "rgba(46, 125, 50, 0.08)",
+                bgcolor: msg.role === "user" ? "rgba(3, 169, 244, 0.16)" : "rgba(67, 160, 71, 0.16)",
                 alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
                 maxWidth: "80%",
                 borderRadius: 2,

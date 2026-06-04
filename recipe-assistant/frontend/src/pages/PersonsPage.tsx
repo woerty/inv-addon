@@ -90,7 +90,7 @@ const PersonsPage = () => {
       </Typography>
 
       {/* Add new person */}
-      <Box sx={{ mb: 3, p: 2, bgcolor: "#f5f5f5", borderRadius: 1 }}>
+      <Box sx={{ mb: 3, p: 2, bgcolor: "action.hover", borderRadius: 1 }}>
         <Typography variant="h6" gutterBottom>Neue Person</Typography>
         <TextField
           label="Name"
@@ -125,7 +125,8 @@ const PersonsPage = () => {
           <ListItem
             key={person.id}
             sx={{
-              border: "1px solid #e0e0e0",
+              border: 1,
+              borderColor: "divider",
               borderRadius: 1,
               mb: 1,
               flexDirection: "column",

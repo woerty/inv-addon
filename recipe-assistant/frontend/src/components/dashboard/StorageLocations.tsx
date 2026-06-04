@@ -2,12 +2,14 @@ import { Box, Paper, Typography } from "@mui/material";
 import WarehouseIcon from "@mui/icons-material/Warehouse";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import type { StorageLocationCount } from "../../types";
+import { useChartTheme } from "./useChartTheme";
 
 interface Props {
   locations: StorageLocationCount[];
 }
 
 export default function StorageLocations({ locations }: Props) {
+  const ct = useChartTheme();
   return (
     <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: 2 }}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 1 }}>
@@ -19,9 +21,9 @@ export default function StorageLocations({ locations }: Props) {
       ) : (
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={locations} layout="vertical">
-            <XAxis type="number" tick={{ fontSize: 11 }} />
-            <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={100} />
-            <Tooltip />
+            <XAxis type="number" tick={{ fontSize: 11, fill: ct.tickFill }} axisLine={{ stroke: ct.lineStroke }} tickLine={{ stroke: ct.lineStroke }} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: ct.tickFill }} axisLine={{ stroke: ct.lineStroke }} tickLine={{ stroke: ct.lineStroke }} width={100} />
+            <Tooltip {...ct.tooltip} cursor={{ fill: ct.lineStroke }} />
             <Bar dataKey="item_count" name="Artikel" fill="#26a69a" radius={[0, 3, 3, 0]} />
           </BarChart>
         </ResponsiveContainer>

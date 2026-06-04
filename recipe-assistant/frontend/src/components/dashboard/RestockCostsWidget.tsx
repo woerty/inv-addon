@@ -2,12 +2,14 @@ import { Box, Paper, Typography } from "@mui/material";
 import EuroIcon from "@mui/icons-material/Euro";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import type { RestockCosts } from "../../types";
+import { useChartTheme } from "./useChartTheme";
 
 interface Props {
   costs: RestockCosts;
 }
 
 export default function RestockCostsWidget({ costs }: Props) {
+  const ct = useChartTheme();
   const diff = costs.previous_period_cents > 0
     ? Math.round((costs.total_cents - costs.previous_period_cents) / costs.previous_period_cents * 100)
     : 0;
@@ -33,9 +35,9 @@ export default function RestockCostsWidget({ costs }: Props) {
       {chartData.length > 0 && (
         <ResponsiveContainer width="100%" height={120}>
           <BarChart data={chartData}>
-            <XAxis dataKey="week" tick={{ fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} />
-            <Tooltip formatter={(v) => `€${Number(v ?? 0).toFixed(2)}`} />
+            <XAxis dataKey="week" tick={{ fontSize: 10, fill: ct.tickFill }} axisLine={{ stroke: ct.lineStroke }} tickLine={{ stroke: ct.lineStroke }} />
+            <YAxis tick={{ fontSize: 10, fill: ct.tickFill }} axisLine={{ stroke: ct.lineStroke }} tickLine={{ stroke: ct.lineStroke }} />
+            <Tooltip {...ct.tooltip} cursor={{ fill: ct.lineStroke }} formatter={(v) => `€${Number(v ?? 0).toFixed(2)}`} />
             <Bar dataKey="euro" fill="#5c6bc0" radius={[3, 3, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>

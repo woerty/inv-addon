@@ -60,7 +60,11 @@ const Navbar = () => {
 
   return (
     <>
-      <AppBar position="static" sx={{ background: "linear-gradient(90deg, #0d47a1 0%, #1565c0 100%)" }}>
+      <AppBar
+        position="static"
+        elevation={0}
+        sx={{ bgcolor: "background.paper", color: "text.primary", borderBottom: 1, borderColor: "divider" }}
+      >
         <Toolbar>
           <IconButton
             color="inherit"
@@ -70,7 +74,7 @@ const Navbar = () => {
           >
             <MenuIcon />
           </IconButton>
-          <InventoryIcon sx={{ mr: 1 }} />
+          <InventoryIcon sx={{ mr: 1, color: "primary.main" }} />
           <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>
             Recipe Assistant
           </Typography>
@@ -83,7 +87,7 @@ const Navbar = () => {
         onClose={() => setDrawerOpen(false)}
       >
         <Box sx={{ width: 260, bgcolor: "background.default", height: "100%" }}>
-          <Box sx={{ p: 2, background: "linear-gradient(135deg, #0d47a1 0%, #1565c0 100%)" }}>
+          <Box sx={(theme) => ({ p: 2, background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 100%)` })}>
             <Typography variant="h6" sx={{ color: "white", fontWeight: 700 }}>
               Recipe Assistant
             </Typography>
@@ -99,7 +103,7 @@ const Navbar = () => {
                   borderRadius: 2,
                   mb: 0.5,
                   "&.Mui-selected": {
-                    bgcolor: "primary.50",
+                    bgcolor: "action.selected",
                     color: "primary.main",
                     "& .MuiListItemIcon-root": { color: "primary.main" },
                   },

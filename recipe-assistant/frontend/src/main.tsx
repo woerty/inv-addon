@@ -5,15 +5,25 @@ import App from "./App";
 
 const theme = createTheme({
   palette: {
-    primary: { main: "#1565c0", light: "#1976d2", dark: "#0d47a1" },
-    secondary: { main: "#f57c00", light: "#ff9800", dark: "#e65100" },
-    success: { main: "#2e7d32" },
-    warning: { main: "#f9a825" },
-    error: { main: "#c62828" },
+    // Hardcoded to match Home Assistant's default DARK theme. The add-on is
+    // shown through HA Ingress in an iframe, which cannot inherit HA's live
+    // theme CSS variables, so we mirror HA's default-dark tokens here.
+    mode: "dark",
+    primary: { main: "#03a9f4", light: "#b3e5fc", dark: "#0288d1" },
+    secondary: { main: "#ff9800", light: "#ffb74d", dark: "#f57c00" },
+    success: { main: "#43a047" },
+    warning: { main: "#ffa600" },
+    error: { main: "#db4437" },
+    info: { main: "#039be5" },
     background: {
-      default: "#f5f5f5",
-      paper: "#ffffff",
+      default: "#111111",
+      paper: "#1c1c1c",
     },
+    text: {
+      primary: "#e1e1e1",
+      secondary: "#9b9b9b",
+    },
+    divider: "rgba(225, 225, 225, 0.12)",
   },
   typography: {
     h4: { fontWeight: 700 },
@@ -27,7 +37,7 @@ const theme = createTheme({
       defaultProps: { elevation: 0 },
       styleOverrides: {
         root: { backgroundImage: "none" },
-        outlined: { borderColor: "#e0e0e0" },
+        outlined: ({ theme }) => ({ borderColor: theme.palette.divider }),
       },
     },
     MuiButton: {
@@ -42,7 +52,7 @@ const theme = createTheme({
     },
     MuiTableCell: {
       styleOverrides: {
-        head: { fontWeight: 700, backgroundColor: "#f5f5f5" },
+        head: ({ theme }) => ({ fontWeight: 700, backgroundColor: theme.palette.action.hover }),
       },
     },
     MuiToggleButton: {

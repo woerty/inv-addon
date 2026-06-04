@@ -2,6 +2,7 @@ import { Box, IconButton, Paper, Typography } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ReferenceLine, Tooltip, ResponsiveContainer } from "recharts";
 import type { DashboardProductDetail } from "../../types";
+import { useChartTheme } from "./useChartTheme";
 
 interface Props {
   detail: DashboardProductDetail;
@@ -12,6 +13,7 @@ const formatDate = (ts: number) =>
   new Date(ts).toLocaleDateString("de-DE", { day: "numeric", month: "numeric" });
 
 export default function ProductDetail({ detail, onClose }: Props) {
+  const ct = useChartTheme();
   const chartData = detail.history.map((h) => ({
     time: new Date(h.timestamp).getTime(),
     quantity: h.quantity_after,
@@ -38,17 +40,24 @@ export default function ProductDetail({ detail, onClose }: Props) {
       {chartData.length > 0 ? (
         <ResponsiveContainer width="100%" height={250}>
           <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+            <CartesianGrid strokeDasharray="3 3" stroke={ct.lineStroke} />
             <XAxis
               dataKey="time"
               type="number"
               scale="time"
               domain={["dataMin", "dataMax"]}
               tickFormatter={formatDate}
-              tick={{ fontSize: 11 }}
+              tick={{ fontSize: 11, fill: ct.tickFill }}
+              axisLine={{ stroke: ct.lineStroke }}
+              tickLine={{ stroke: ct.lineStroke }}
             />
-            <YAxis tick={{ fontSize: 11 }} />
+            <YAxis
+              tick={{ fontSize: 11, fill: ct.tickFill }}
+              axisLine={{ stroke: ct.lineStroke }}
+              tickLine={{ stroke: ct.lineStroke }}
+            />
             <Tooltip
+              {...ct.tooltip}
               labelFormatter={(ts) => new Date(Number(ts)).toLocaleString("de-DE", {
                 day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit"
               })}
