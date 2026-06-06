@@ -55,14 +55,16 @@ async def parse_cart_response(
                     break
             unit_quantity = product.get("unit_quantity")
             image_id = product.get("image_id")
-            price_cents = product.get("display_price")
+            # Cart/order-line articles carry their unit price under "price";
+            # "display_price" is the search-result field name (kept as fallback).
+            price_cents = product.get("price", product.get("display_price"))
         else:
             picnic_id = line.get("id", "")
             name = line.get("name", "unknown")
             quantity = line.get("quantity", line.get("count", 1))
             unit_quantity = line.get("unit_quantity")
             image_id = line.get("image_id")
-            price_cents = line.get("display_price")
+            price_cents = line.get("price", line.get("display_price"))
 
         item_total = (price_cents or 0) * quantity
         total_price += item_total
