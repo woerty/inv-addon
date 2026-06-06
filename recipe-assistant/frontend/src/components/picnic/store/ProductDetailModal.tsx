@@ -8,6 +8,7 @@ import RemoveIcon from "@mui/icons-material/Remove";
 import CloseIcon from "@mui/icons-material/Close";
 import RepeatIcon from "@mui/icons-material/Repeat";
 import { usePicnicProduct } from "../../../hooks/usePicnicProduct";
+import { formatPrice } from "../../../utils/format";
 
 interface ProductDetailModalProps {
   picnicId: string | null;
@@ -21,9 +22,6 @@ const imgUrl = (imageId: string | null) =>
   imageId
     ? `https://storefront-prod.de.picnicinternational.com/static/images/${imageId}/large.png`
     : undefined;
-
-const formatPrice = (cents: number | null) =>
-  cents != null ? `€${(cents / 100).toFixed(2).replace(".", ",")}` : "";
 
 export default function ProductDetailModal({
   picnicId, onClose, onCartAdd, onCartRemove, onSubscribe,

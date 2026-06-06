@@ -2,6 +2,7 @@ import {
   Card, CardActionArea, CardContent, CardMedia, Chip, Stack, Typography,
 } from "@mui/material";
 import RepeatIcon from "@mui/icons-material/Repeat";
+import { formatPrice } from "../../../utils/format";
 
 interface ProductCardProps {
   picnicId: string;
@@ -20,9 +21,6 @@ const imgUrl = (imageId: string | null, size = "medium") =>
   imageId
     ? `https://storefront-prod.de.picnicinternational.com/static/images/${imageId}/${size}.png`
     : undefined;
-
-const formatPrice = (cents: number | null) =>
-  cents != null ? `€${(cents / 100).toFixed(2).replace(".", ",")}` : "";
 
 export default function ProductCard({
   picnicId, name, unitQuantity, imageId, priceCents,

@@ -4,6 +4,7 @@ import {
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import type { PendingOrder } from "../../../types";
+import { formatPrice } from "../../../utils/format";
 
 const imgUrl = (imageId: string | null) =>
   imageId
@@ -31,6 +32,7 @@ export default function OrderCard({ order }: OrderCardProps) {
             </Typography>
             <Typography variant="caption" color="text.secondary">
               {order.total_items} Artikel
+              {order.total_price_cents != null && ` · ${formatPrice(order.total_price_cents)}`}
             </Typography>
           </Box>
           <Stack direction="row" alignItems="center" spacing={1}>
@@ -51,6 +53,11 @@ export default function OrderCard({ order }: OrderCardProps) {
                 )}
                 <Typography variant="body2" flex={1} noWrap>{item.name}</Typography>
                 <Typography variant="body2" color="text.secondary">{item.quantity}x</Typography>
+                {item.price_cents != null && (
+                  <Typography variant="body2" fontWeight={600} sx={{ minWidth: 56, textAlign: "right" }}>
+                    {formatPrice(item.price_cents * item.quantity)}
+                  </Typography>
+                )}
               </Stack>
             ))}
           </Stack>

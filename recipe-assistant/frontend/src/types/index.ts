@@ -134,6 +134,7 @@ export interface PendingOrder {
   status: string;
   delivery_time: string | null;
   total_items: number;
+  total_price_cents: number | null;
   items: PendingOrderItem[];
 }
 

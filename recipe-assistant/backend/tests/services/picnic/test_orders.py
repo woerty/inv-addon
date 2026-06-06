@@ -47,6 +47,29 @@ async def test_parse_pending_orders_filters_completed():
     assert result.quantity_map == {"s100": 3, "s200": 3}
 
 
+async def test_parse_pending_orders_computes_total_price():
+    client = FakePicnicClient()
+    client.deliveries_summary = [{"id": "d1", "status": "CURRENT"}]
+    client.delivery_details = {
+        "d1": _make_delivery(
+            "d1", "CURRENT", [_make_item("s100", "Milch", 2), _make_item("s200", "Brot", 1)]
+        ),
+    }
+    result = await parse_pending_orders(client)
+    order = result.orders[0]
+    # _make_item carries 199 per unit; total = 199*2 + 199*1
+    assert order.total_price_cents == 597
+
+
+async def test_parse_pending_orders_total_none_without_prices():
+    client = FakePicnicClient()
+    client.deliveries_summary = [{"id": "d1", "status": "CURRENT"}]
+    line = {"id": "line-s1", "items": [{"id": "s1", "name": "X"}], "decorators": [{"quantity": 1}]}
+    client.delivery_details = {"d1": _make_delivery("d1", "CURRENT", [line])}
+    result = await parse_pending_orders(client)
+    assert result.orders[0].total_price_cents is None
+
+
 async def test_parse_pending_orders_empty_when_all_completed():
     client = FakePicnicClient()
     client.deliveries_summary = [{"id": "d1", "status": "COMPLETED"}]

@@ -48,12 +48,16 @@ async def parse_pending_orders(
                 )
             )
 
+        priced = [(i.price_cents, i.quantity) for i in items if i.price_cents is not None]
+        total_price_cents = sum(p * q for p, q in priced) if priced else None
+
         orders.append(
             PendingOrder(
                 delivery_id=delivery_id,
                 status=summary.get("status", "UNKNOWN"),
                 delivery_time=_parse_delivery_time(detail),
                 total_items=sum(i.quantity for i in items),
+                total_price_cents=total_price_cents,
                 items=items,
             )
         )

@@ -2,8 +2,7 @@ import { Box, Button, CircularProgress, Divider, Stack, Typography } from "@mui/
 import DeleteSweepIcon from "@mui/icons-material/DeleteSweep";
 import CartItemComponent from "./CartItem";
 import type { Cart } from "../../../types";
-
-const formatPrice = (cents: number) => `€${(cents / 100).toFixed(2).replace(".", ",")}`;
+import { formatPrice } from "../../../utils/format";
 
 interface CartTabProps {
   cart: Cart | null;

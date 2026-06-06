@@ -158,6 +158,7 @@ class PendingOrder(BaseModel):
     status: str
     delivery_time: datetime | None = None
     total_items: int
+    total_price_cents: int | None = None
     items: list[PendingOrderItem]
 
 

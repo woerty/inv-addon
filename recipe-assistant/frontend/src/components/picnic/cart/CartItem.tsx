@@ -4,14 +4,12 @@ import AddIcon from "@mui/icons-material/Add";
 import RemoveIcon from "@mui/icons-material/Remove";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import type { CartItem as CartItemType } from "../../../types";
+import { formatPrice } from "../../../utils/format";
 
 const imgUrl = (imageId: string | null) =>
   imageId
     ? `https://storefront-prod.de.picnicinternational.com/static/images/${imageId}/small.png`
     : undefined;
-
-const formatPrice = (cents: number | null) =>
-  cents != null ? `€${(cents / 100).toFixed(2).replace(".", ",")}` : "";
 
 interface CartItemProps {
   item: CartItemType;
