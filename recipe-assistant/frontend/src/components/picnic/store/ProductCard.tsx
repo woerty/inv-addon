@@ -3,6 +3,7 @@ import {
 } from "@mui/material";
 import RepeatIcon from "@mui/icons-material/Repeat";
 import { formatPrice } from "../../../utils/format";
+import { PICNIC_IMG_BG } from "../../../utils/picnic";
 
 interface ProductCardProps {
   picnicId: string;
@@ -34,7 +35,7 @@ export default function ProductCard({
           height="140"
           image={imgUrl(imageId)}
           alt={name}
-          sx={{ objectFit: "contain", p: 1, bgcolor: "#fafafa" }}
+          sx={{ objectFit: "contain", p: 1, bgcolor: PICNIC_IMG_BG }}
         />
         <CardContent sx={{ pb: 1 }}>
           <Typography variant="body2" fontWeight={500} noWrap>{name}</Typography>

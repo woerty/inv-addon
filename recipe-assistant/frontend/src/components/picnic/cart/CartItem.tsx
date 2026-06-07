@@ -5,6 +5,7 @@ import RemoveIcon from "@mui/icons-material/Remove";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import type { CartItem as CartItemType } from "../../../types";
 import { formatPrice } from "../../../utils/format";
+import { PICNIC_IMG_BG } from "../../../utils/picnic";
 
 const imgUrl = (imageId: string | null) =>
   imageId
@@ -47,7 +48,7 @@ export default function CartItem({ item, onAdd, onRemove, onClick }: CartItemPro
     >
       {item.image_id && (
         <Box component="img" src={imgUrl(item.image_id)} alt={item.name}
-          sx={{ width: 48, height: 48, objectFit: "contain" }} />
+          sx={{ width: 48, height: 48, objectFit: "contain", bgcolor: PICNIC_IMG_BG, borderRadius: 1, p: 0.5 }} />
       )}
       <Box flex={1} minWidth={0}>
         <Typography variant="body2" noWrap fontWeight={500}>{item.name}</Typography>

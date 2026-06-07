@@ -9,6 +9,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import RepeatIcon from "@mui/icons-material/Repeat";
 import { usePicnicProduct } from "../../../hooks/usePicnicProduct";
 import { formatPrice } from "../../../utils/format";
+import { PICNIC_IMG_BG } from "../../../utils/picnic";
 
 interface ProductDetailModalProps {
   picnicId: string | null;
@@ -67,7 +68,7 @@ export default function ProductDetailModal({
         ) : product ? (
           <Stack spacing={2}>
             {product.image_id && (
-              <Box display="flex" justifyContent="center" sx={{ bgcolor: "#fafafa", borderRadius: 1, p: 2 }}>
+              <Box display="flex" justifyContent="center" sx={{ bgcolor: PICNIC_IMG_BG, borderRadius: 1, p: 2 }}>
                 <img src={imgUrl(product.image_id)} alt={product.name} style={{ maxHeight: 200, objectFit: "contain" }} />
               </Box>
             )}

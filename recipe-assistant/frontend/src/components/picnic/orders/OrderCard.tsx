@@ -5,6 +5,7 @@ import {
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import type { PendingOrder } from "../../../types";
 import { formatPrice } from "../../../utils/format";
+import { PICNIC_IMG_BG } from "../../../utils/picnic";
 
 const imgUrl = (imageId: string | null) =>
   imageId
@@ -51,7 +52,7 @@ export default function OrderCard({ order }: OrderCardProps) {
                 <Stack key={i} direction="row" alignItems="center" spacing={1}>
                   {item.image_id && (
                     <Box component="img" src={imgUrl(item.image_id)} alt={item.name}
-                      sx={{ width: 32, height: 32, objectFit: "contain" }} />
+                      sx={{ width: 32, height: 32, objectFit: "contain", bgcolor: PICNIC_IMG_BG, borderRadius: 1, p: 0.5 }} />
                   )}
                   <Box flex={1} minWidth={0}>
                     <Typography variant="body2" noWrap>{item.name}</Typography>
