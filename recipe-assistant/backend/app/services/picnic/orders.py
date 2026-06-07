@@ -9,7 +9,11 @@ from app.schemas.picnic import (
     PendingOrdersResponse,
 )
 from app.services.picnic.client import PicnicClientProtocol
-from app.services.picnic.import_flow import _flatten_delivery_items, _parse_delivery_time
+from app.services.picnic.import_flow import (
+    _delivery_total_cents,
+    _flatten_delivery_items,
+    _parse_delivery_time,
+)
 
 log = logging.getLogger(__name__)
 
@@ -40,21 +44,32 @@ async def parse_pending_orders(
             continue
 
         flat_items = _flatten_delivery_items(detail)
-        items: list[PendingOrderItem] = []
+        # Picnic returns one order line per unit for some products, so the same
+        # picnic_id can appear on several lines. Merge by picnic_id and sum the
+        # quantities so the UI shows "2x …" instead of two "1x …" rows.
+        merged: dict[str, PendingOrderItem] = {}
         for fi in flat_items:
-            quantity_map[fi["picnic_id"]] += fi["quantity"]
-            items.append(
-                PendingOrderItem(
-                    picnic_id=fi["picnic_id"],
+            pid = fi["picnic_id"]
+            quantity_map[pid] += fi["quantity"]
+            existing = merged.get(pid)
+            if existing is None:
+                merged[pid] = PendingOrderItem(
+                    picnic_id=pid,
                     name=fi["name"],
                     quantity=fi["quantity"],
                     image_id=fi.get("image_id"),
                     price_cents=fi.get("price_cents"),
                 )
-            )
+            else:
+                existing.quantity += fi["quantity"]
+        items = list(merged.values())
 
-        priced = [(i.price_cents, i.quantity) for i in items if i.price_cents is not None]
-        total_price_cents = sum(p * q for p, q in priced) if priced else None
+        # Prefer Picnic's authoritative per-order totals (they include
+        # order-level discounts); fall back to summing line prices.
+        total_price_cents = _delivery_total_cents(detail)
+        if total_price_cents is None:
+            priced = [(i.price_cents, i.quantity) for i in items if i.price_cents is not None]
+            total_price_cents = sum(p * q for p, q in priced) if priced else None
 
         orders.append(
             PendingOrder(

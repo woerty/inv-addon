@@ -11,43 +11,68 @@ SAMPLE_DELIVERIES_SUMMARY = [
     },
 ]
 
+# Shaped like a real /deliveries/{id} response: orders[].items[] are ORDER_LINEs
+# carrying the line total (`price`/`display_price`); the nested ORDER_ARTICLE
+# carries a sentinel `price` (432199) that must be ignored, plus `image_ids`.
 SAMPLE_DELIVERY_DETAIL = {
+    "type": "DELIVERY",
     "delivery_id": "del-1",
     "status": "COMPLETED",
     "delivery_time": {
         "start": "2026-04-04T10:00:00+00:00",
         "end": "2026-04-04T10:30:00+00:00",
     },
+    "slot": {
+        "window_start": "2026-04-04T10:00:00+00:00",
+        "window_end": "2026-04-04T10:30:00+00:00",
+    },
     "orders": [
         {
+            "type": "ORDER",
+            "id": "order-1",
+            "total_price": 347,  # 198 (2x milk) + 149 (spaghetti)
             "items": [
                 {
+                    "type": "ORDER_LINE",
                     "id": "order-line-1",
+                    "price": 198,
+                    "display_price": 198,
                     "items": [
                         {
+                            "type": "ORDER_ARTICLE",
                             "id": "s100",
                             "name": "Ja! Vollmilch 1 L",
-                            "image_id": "img-100",
+                            "image_ids": ["img-100"],
                             "unit_quantity": "1 L",
-                            "price": 99,
+                            "price": 432199,
+                            "decorators": [
+                                {"type": "IMMUTABLE"},
+                                {"type": "QUANTITY", "quantity": 2},
+                            ],
                         }
                     ],
-                    "decorators": [{"quantity": 2}],
                 },
                 {
+                    "type": "ORDER_LINE",
                     "id": "order-line-2",
+                    "price": 149,
+                    "display_price": 149,
                     "items": [
                         {
+                            "type": "ORDER_ARTICLE",
                             "id": "s200",
                             "name": "Barilla Spaghetti Nr. 5 500 g",
-                            "image_id": "img-200",
+                            "image_ids": ["img-200"],
                             "unit_quantity": "500 g",
-                            "price": 149,
+                            "price": 432199,
+                            "decorators": [
+                                {"type": "IMMUTABLE"},
+                                {"type": "QUANTITY", "quantity": 1},
+                            ],
                         }
                     ],
-                    "decorators": [{"quantity": 1}],
                 },
-            ]
+            ],
         }
     ],
 }

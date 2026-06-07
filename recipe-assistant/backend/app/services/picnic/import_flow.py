@@ -27,10 +27,27 @@ from app.services.picnic.matching import (
 )
 
 
+def _quantity(line: dict[str, Any], product: dict[str, Any]) -> int:
+    """Ordered count. In real Picnic data the QUANTITY decorator sits on the
+    ORDER_ARTICLE; check there first, then fall back to the ORDER_LINE."""
+    for source in (product, line):
+        for deco in source.get("decorators", []):
+            if isinstance(deco, dict) and "quantity" in deco:
+                return deco["quantity"]
+    return 1
+
+
 def _flatten_delivery_items(detail: dict[str, Any]) -> list[dict[str, Any]]:
     """python-picnic-api2 delivery detail is nested: orders[].items[].items[].
 
-    Flatten to a list of line items with {picnic_id, name, unit_quantity, image_id, quantity}.
+    The outer `orders[].items[]` entries are ORDER_LINEs; the inner `items[]` are
+    ORDER_ARTICLEs. Flatten to {picnic_id, name, unit_quantity, image_id,
+    price_cents (per-unit), quantity}.
+
+    Pricing: the per-unit price is NOT on the article — the ORDER_ARTICLE.price is
+    a sentinel (observed as 432199 for every article). The real money is on the
+    ORDER_LINE as a line total (`price`/`display_price`), so the unit price is
+    that line total divided by the line quantity.
     """
     out: list[dict[str, Any]] = []
     for order in detail.get("orders", []):
@@ -41,27 +58,57 @@ def _flatten_delivery_items(detail: dict[str, Any]) -> list[dict[str, Any]]:
             product = inner[0]
             if not isinstance(product, dict) or "id" not in product:
                 continue
-            qty = 1
-            for deco in line.get("decorators", []):
-                if isinstance(deco, dict) and "quantity" in deco:
-                    qty = deco["quantity"]
-                    break
+            qty = _quantity(line, product)
+
+            line_total = line.get("price")
+            if line_total is None:
+                line_total = line.get("display_price")
+            unit_price = round(line_total / qty) if isinstance(line_total, int) and qty else None
+
+            # Articles expose `image_ids` (list); fall back to the older `image_id`.
+            image_id = None
+            image_ids = product.get("image_ids")
+            if isinstance(image_ids, list) and image_ids:
+                image_id = image_ids[0]
+            else:
+                image_id = product.get("image_id")
+
             out.append(
                 {
                     "picnic_id": product["id"],
                     "name": product.get("name", ""),
                     "unit_quantity": product.get("unit_quantity"),
-                    "image_id": product.get("image_id"),
-                    "price_cents": product.get("price", product.get("display_price")),
+                    "image_id": image_id,
+                    "price_cents": unit_price,
                     "quantity": qty,
                 }
             )
     return out
 
 
+def _delivery_total_cents(detail: dict[str, Any]) -> int | None:
+    """Authoritative delivery total: sum of each Picnic order's `total_price`.
+
+    A delivery can bundle several orders, and the order total already reflects
+    promos/discounts, so it is preferred over summing line prices (which miss
+    order-level discounts). Returns None if no order carries a total.
+    """
+    totals = [
+        o.get("total_price")
+        for o in detail.get("orders", [])
+        if isinstance(o.get("total_price"), int)
+    ]
+    return sum(totals) if totals else None
+
+
 def _parse_delivery_time(detail: dict[str, Any]) -> datetime | None:
-    dt = detail.get("delivery_time", {})
+    # A delivered order carries `delivery_time`; a CURRENT (not-yet-delivered)
+    # order only has the reserved `slot` window, so fall back to that.
+    dt = detail.get("delivery_time") or {}
     start = dt.get("start")
+    if not start:
+        slot = detail.get("slot") or {}
+        start = slot.get("window_start")
     if not start:
         return None
     try:
