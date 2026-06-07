@@ -15,8 +15,8 @@ import type { PicnicSearchResult, TrackedProductCreate } from "../types";
 
 export default function PicnicStorePage() {
   const { status, loading: statusLoading } = usePicnicStatus();
-  const { cart, loading: cartLoading, add: cartAdd, remove: cartRemove, clear: cartClear } = usePicnicCart();
-  const { orders, quantityMap: orderQuantities, loading: ordersLoading } = usePicnicPendingOrders();
+  const { cart, loading: cartLoading, add: cartAdd, remove: cartRemove, clear: cartClear, refetch: cartRefetch } = usePicnicCart();
+  const { orders, quantityMap: orderQuantities, loading: ordersLoading, refetch: ordersRefetch } = usePicnicPendingOrders();
   const { items: tracked, create: createTracked } = useTrackedProducts();
 
   const [tab, setTab] = useState(0);
@@ -45,6 +45,11 @@ export default function PicnicStorePage() {
     await cartClear();
   }, [cartClear]);
 
+  const handleOrderPlaced = useCallback(async () => {
+    await Promise.all([cartRefetch(), ordersRefetch()]);
+    setTab(3);
+  }, [cartRefetch, ordersRefetch]);
+
   const handleSubscribe = useCallback(async (data: TrackedProductCreate) => {
     await createTracked(data);
     setSubscribeTarget(null);
@@ -65,7 +70,7 @@ export default function PicnicStorePage() {
 
       {tab === 0 && <StoreTab cartQuantities={cartQuantities} orderQuantities={orderQuantities} inventoryQuantities={inventoryQuantities} subscribedIds={subscribedIds} onProductClick={setDetailId} />}
       {tab === 1 && <OffersTab onProductClick={setDetailId} />}
-      {tab === 2 && <CartTab cart={cart} loading={cartLoading} onAdd={handleCartAdd} onRemove={handleCartRemove} onClear={handleCartClear} onProductClick={setDetailId} />}
+      {tab === 2 && <CartTab cart={cart} loading={cartLoading} onAdd={handleCartAdd} onRemove={handleCartRemove} onClear={handleCartClear} onProductClick={setDetailId} onOrderPlaced={handleOrderPlaced} />}
       {tab === 3 && <OrdersTab orders={orders} loading={ordersLoading} />}
       {tab === 4 && <SubscriptionsTab orderQuantities={orderQuantities} />}
 

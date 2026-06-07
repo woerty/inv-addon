@@ -209,3 +209,60 @@ async def test_product_detail_without_bundles_is_empty(client, override_picnic_c
     assert resp.json()["bundles"] == []
 
 
+# ── Delivery slots / checkout ─────────────────────────────────────────
+
+async def test_get_delivery_slots(client, override_picnic_client):
+    fake = override_picnic_client
+    fake.delivery_slots_raw = {
+        "delivery_slots": [
+            {
+                "slot_id": "slot-1",
+                "window_start": "2026-06-08T15:45:00.000+02:00",
+                "window_end": "2026-06-08T17:35:00.000+02:00",
+                "cut_off_time": "2026-06-07T23:00:00.000+02:00",
+                "is_available": True,
+                "selected": True,
+                "reserved": True,
+                "minimum_order_value": 4500,
+            }
+        ]
+    }
+    fake.cart = {"items": [], "total_price": 1099, "selected_slot": {"slot_id": "slot-1"}}
+    resp = await client.get("/api/picnic/cart/delivery-slots")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["selected_slot_id"] == "slot-1"
+    assert data["cart_total_price_cents"] == 1099
+    assert data["slots"][0]["minimum_order_value_cents"] == 4500
+
+
+async def test_set_slot(client, override_picnic_client):
+    fake = override_picnic_client
+    resp = await client.post("/api/picnic/cart/slot", json={"slot_id": "slot-1"})
+    assert resp.status_code == 200
+    assert fake.set_slot_calls == ["slot-1"]
+
+
+async def test_checkout_success(client, override_picnic_client):
+    fake = override_picnic_client
+    fake.cart = {"items": [], "total_price": 5000, "mts": 42}
+    fake.checkout_start_results = [{"order_id": "ord-9", "total_price": 5000}]
+    fake.initiate_payment_result = {"transaction_id": "tx-9"}
+    fake.status_sequence = ["FINISHED"]
+    resp = await client.post("/api/picnic/cart/checkout")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["order_id"] == "ord-9"
+    assert data["status"] == "FINISHED"
+
+
+async def test_checkout_failure_returns_409(client, override_picnic_client):
+    fake = override_picnic_client
+    fake.cart = {"items": [], "total_price": 100, "mts": 42}
+    fake.checkout_start_results = [
+        {"error": {"code": "MIN_ORDER_VALUE", "message": "Mindestbestellwert nicht erreicht"}}
+    ]
+    resp = await client.post("/api/picnic/cart/checkout")
+    assert resp.status_code == 409
+
+
