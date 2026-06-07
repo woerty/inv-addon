@@ -46,6 +46,9 @@ class FakePicnicClient:
         self.initiate_payment_calls: list[str] = []
         self.initiate_payment_result: dict[str, Any] = {"transaction_id": "tx-default"}
         self.status_sequence: list[str] = ["FINISHED"]
+        # Raw status dicts; when set, take precedence over status_sequence (lets
+        # tests exercise alternate field names / shapes).
+        self.status_responses: list[dict[str, Any]] = []
         self._status_idx = 0
 
     async def search(self, query: str) -> list[dict[str, Any]]:
@@ -126,6 +129,10 @@ class FakePicnicClient:
         return self.initiate_payment_result
 
     async def get_checkout_status(self, transaction_id: str) -> dict[str, Any]:
+        if self.status_responses:
+            idx = min(self._status_idx, len(self.status_responses) - 1)
+            self._status_idx += 1
+            return self.status_responses[idx]
         idx = min(self._status_idx, len(self.status_sequence) - 1)
         self._status_idx += 1
         return {"checkout_status": self.status_sequence[idx]}

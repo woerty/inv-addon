@@ -131,12 +131,40 @@ async def test_place_order_3ds_raises():
         await place_order(client, sleep=_no_sleep)
 
 
-async def test_place_order_poll_timeout_raises():
+async def test_place_order_poll_timeout_returns_processing():
+    """If the order was submitted (order_id + payment accepted) but no terminal
+    status arrives, report it as submitted/PROCESSING — never as a failure, since
+    the order has in fact been placed (verified live: the cart is cleared)."""
     client = FakePicnicClient()
     client.cart = {"mts": 1}
     client.checkout_start_results = [{"order_id": "ord-4"}]
     client.initiate_payment_result = {"transaction_id": "tx-4"}
-    client.status_sequence = ["PENDING"]  # never reaches FINISHED
+    client.status_sequence = ["PENDING"]  # never reaches a terminal status
+
+    result = await place_order(client, sleep=_no_sleep, max_attempts=3)
+    assert result.order_id == "ord-4"
+    assert result.status == "PROCESSING"
+
+
+async def test_place_order_finished_via_alternate_status_field():
+    """Accept a terminal status reported under "status" (not just "checkout_status")
+    and case-insensitively — the live status shape was not pinned down."""
+    client = FakePicnicClient()
+    client.cart = {"mts": 1}
+    client.checkout_start_results = [{"order_id": "ord-5"}]
+    client.initiate_payment_result = {"transaction_id": "tx-5"}
+    client.status_responses = [{"status": "completed"}]
+
+    result = await place_order(client, sleep=_no_sleep)
+    assert result.status == "FINISHED"
+
+
+async def test_place_order_failed_status_raises():
+    client = FakePicnicClient()
+    client.cart = {"mts": 1}
+    client.checkout_start_results = [{"order_id": "ord-6"}]
+    client.initiate_payment_result = {"transaction_id": "tx-6"}
+    client.status_sequence = ["FAILED"]
 
     with pytest.raises(PicnicCheckoutError):
-        await place_order(client, sleep=_no_sleep, max_attempts=3)
+        await place_order(client, sleep=_no_sleep)

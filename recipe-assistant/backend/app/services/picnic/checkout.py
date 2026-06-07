@@ -28,6 +28,12 @@ log = logging.getLogger("picnic.checkout")
 # resolve value re-runs checkout/start with the age confirmation set.
 _AGE_RESOLVE_KEY = "age_verified"
 
+# Terminal checkout statuses. The live status shape was not pinned down (the order
+# succeeds — cart clears — before our poll observes a terminal value), so accept a
+# generous set of success/failure tokens, checked case-insensitively.
+_DONE_STATUSES = {"FINISHED", "COMPLETED", "DONE", "SUCCESS", "PAID"}
+_FAILED_STATUSES = {"FAILED", "CANCELLED", "CANCELED", "ERROR", "REJECTED", "DECLINED"}
+
 
 class PicnicCheckoutError(Exception):
     """Checkout could not be completed (MOV not met, 3DS required, timeout, ...)."""
@@ -105,18 +111,27 @@ async def place_order(
             "Bitte in der Picnic-App abschließen."
         )
 
-    transaction_id = payment.get("transaction_id", order_id)
+    transaction_id = payment.get("transaction_id") or payment.get("payment_id") or order_id
     for attempt in range(max_attempts):
-        status = (await client.get_checkout_status(transaction_id)).get("checkout_status")
-        if status == "FINISHED":
+        raw = await client.get_checkout_status(transaction_id)
+        status = (raw.get("checkout_status") or raw.get("status") or "").upper()
+        if status in _DONE_STATUSES:
             return OrderPlacedResult(
                 order_id=order_id,
                 status="FINISHED",
                 total_price_cents=checkout.get("total_price"),
             )
+        if status in _FAILED_STATUSES:
+            raise PicnicCheckoutError("Die Bestellung wurde von Picnic abgelehnt.")
         if attempt < max_attempts - 1:
             await sleep(interval_s)
 
-    raise PicnicCheckoutError(
-        "Bestellung wird noch verarbeitet – bitte den Status in der Picnic-App prüfen."
+    # Order was submitted (we have an order_id and payment was accepted without
+    # 3DS) but no terminal status arrived in time. Verified live: the cart is in
+    # fact cleared and the items land on the order, so reporting failure here
+    # would be wrong (and risk a duplicate re-order). Report it as submitted.
+    return OrderPlacedResult(
+        order_id=order_id,
+        status="PROCESSING",
+        total_price_cents=checkout.get("total_price"),
     )
