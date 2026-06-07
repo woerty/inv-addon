@@ -169,6 +169,35 @@ class PendingOrdersResponse(BaseModel):
     quantity_map: dict[str, int]
 
 
+# ── Delivery slots / checkout ─────────────────────────────────────
+
+class DeliverySlot(BaseModel):
+    slot_id: str
+    window_start: datetime
+    window_end: datetime
+    cut_off_time: datetime | None = None
+    is_available: bool = True
+    selected: bool = False
+    reserved: bool = False
+    minimum_order_value_cents: int | None = None
+
+
+class DeliverySlotsResponse(BaseModel):
+    slots: list[DeliverySlot]
+    selected_slot_id: str | None = None
+    cart_total_price_cents: int = 0
+
+
+class SetSlotRequest(BaseModel):
+    slot_id: str
+
+
+class OrderPlacedResult(BaseModel):
+    order_id: str
+    status: str
+    total_price_cents: int | None = None
+
+
 # ── Offers ────────────────────────────────────────────────────────
 
 class OfferItem(BaseModel):

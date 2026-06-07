@@ -12,6 +12,8 @@ import type {
   ImportCommitResponse,
   PicnicSearchResult,
   Cart,
+  DeliverySlotsResponse,
+  OrderPlacedResult,
   PendingOrdersResponse,
   OffersResponse,
   ProductDetail,
@@ -231,6 +233,18 @@ export const cartRemove = (picnic_id: string, count: number = 1) =>
 
 export const cartClear = () =>
   request<Cart>("/picnic/cart/clear", { method: "POST" });
+
+export const getDeliverySlots = () =>
+  request<DeliverySlotsResponse>("/picnic/cart/delivery-slots");
+
+export const setDeliverySlot = (slot_id: string) =>
+  request<Cart>("/picnic/cart/slot", {
+    method: "POST",
+    body: JSON.stringify({ slot_id }),
+  });
+
+export const checkout = () =>
+  request<OrderPlacedResult>("/picnic/cart/checkout", { method: "POST" });
 
 export const getPendingOrders = () =>
   request<PendingOrdersResponse>("/picnic/orders/pending");

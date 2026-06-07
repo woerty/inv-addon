@@ -119,6 +119,31 @@ export interface Cart {
   total_price_cents: number;
 }
 
+// ── Delivery slots / checkout ─────────────────────────────────────
+
+export interface DeliverySlot {
+  slot_id: string;
+  window_start: string;
+  window_end: string;
+  cut_off_time: string | null;
+  is_available: boolean;
+  selected: boolean;
+  reserved: boolean;
+  minimum_order_value_cents: number | null;
+}
+
+export interface DeliverySlotsResponse {
+  slots: DeliverySlot[];
+  selected_slot_id: string | null;
+  cart_total_price_cents: number;
+}
+
+export interface OrderPlacedResult {
+  order_id: string;
+  status: string;
+  total_price_cents: number | null;
+}
+
 // ── Pending Orders ────────────────────────────────────────────────
 
 export interface PendingOrderItem {

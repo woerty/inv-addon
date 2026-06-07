@@ -32,6 +32,7 @@ from app.schemas.picnic import (
     BundleTier,
     CartModifyRequest,
     CartResponse,
+    DeliverySlotsResponse,
     ImportCommitRequest,
     ImportCommitResponse,
     ImportFetchResponse,
@@ -46,7 +47,9 @@ from app.schemas.picnic import (
     PicnicSearchResponse,
     PicnicSearchResult,
     PicnicStatusResponse,
+    OrderPlacedResult,
     ProductDetailResponse,
+    SetSlotRequest,
 )
 from app.services.picnic.bundles import parse_bundles
 from app.services.picnic.cart import (
@@ -54,6 +57,11 @@ from app.services.picnic.cart import (
     parse_cart_response,
 )
 from app.services.picnic.catalog import PicnicProductData, get_product, upsert_product
+from app.services.picnic.checkout import (
+    PicnicCheckoutError,
+    parse_delivery_slots,
+    place_order,
+)
 from app.services.picnic.offers import get_offers
 from app.services.picnic.orders import parse_pending_orders
 from app.services.picnic.client import (
@@ -406,6 +414,42 @@ async def cart_clear(
 ):
     await client.clear_cart()
     return await parse_cart_response(client)
+
+
+# ── Delivery slots / checkout ───────────────────────────────────────────────────
+
+@router.get("/cart/delivery-slots", response_model=DeliverySlotsResponse)
+async def get_delivery_slots(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    return await parse_delivery_slots(client)
+
+
+@router.post("/cart/slot", response_model=CartResponse)
+async def set_slot(
+    body: SetSlotRequest,
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    await client.set_delivery_slot(body.slot_id)
+    return await parse_cart_response(client)
+
+
+@router.post("/cart/checkout", response_model=OrderPlacedResult)
+async def checkout(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    try:
+        return await place_order(client)
+    except PicnicCheckoutError as e:
+        # MOV not met / 3DS required / still processing → actionable client error.
+        # The message is already user-facing German; surface it via "error" so the
+        # frontend's request() shows it directly.
+        raise HTTPException(status_code=409, detail={"error": str(e)})
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
 
 
 # ── Pending orders ────────────────────────────────────────────────────────────

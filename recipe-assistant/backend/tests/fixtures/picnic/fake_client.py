@@ -38,6 +38,18 @@ class FakePicnicClient:
         # picnic_id -> raw product-details page (for get_product_page)
         self.product_pages: dict[str, dict[str, Any]] = {}
         self.promo_page: dict[str, Any] = SAMPLE_PROMO_PAGE
+        # ── checkout / ordering ──
+        self.delivery_slots_raw: dict[str, Any] = {"delivery_slots": []}
+        self.set_slot_calls: list[str] = []
+        self.checkout_start_calls: list[tuple[int, str | None]] = []
+        self.checkout_start_results: list[dict[str, Any]] = []
+        self.initiate_payment_calls: list[str] = []
+        self.initiate_payment_result: dict[str, Any] = {"transaction_id": "tx-default"}
+        self.status_sequence: list[str] = ["FINISHED"]
+        # Raw status dicts; when set, take precedence over status_sequence (lets
+        # tests exercise alternate field names / shapes).
+        self.status_responses: list[dict[str, Any]] = []
+        self._status_idx = 0
 
     async def search(self, query: str) -> list[dict[str, Any]]:
         return self.search_results.get(query.lower(), [])
@@ -98,6 +110,32 @@ class FakePicnicClient:
 
     async def get_promo_page(self) -> dict[str, Any]:
         return self.promo_page
+
+    async def get_delivery_slots(self) -> dict[str, Any]:
+        return self.delivery_slots_raw
+
+    async def set_delivery_slot(self, slot_id: str) -> dict[str, Any]:
+        self.set_slot_calls.append(slot_id)
+        return await self.get_cart()
+
+    async def checkout_start(self, mts: int, resolve_key: str | None = None) -> dict[str, Any]:
+        self.checkout_start_calls.append((mts, resolve_key))
+        if self.checkout_start_results:
+            return self.checkout_start_results.pop(0)
+        return {}
+
+    async def initiate_payment(self, order_id: str) -> dict[str, Any]:
+        self.initiate_payment_calls.append(order_id)
+        return self.initiate_payment_result
+
+    async def get_checkout_status(self, order_id: str) -> dict[str, Any]:
+        if self.status_responses:
+            idx = min(self._status_idx, len(self.status_responses) - 1)
+            self._status_idx += 1
+            return self.status_responses[idx]
+        idx = min(self._status_idx, len(self.status_sequence) - 1)
+        self._status_idx += 1
+        return {"checkout_status": self.status_sequence[idx]}
 
 
 # Static conformance check: ensures FakePicnicClient stays in sync with

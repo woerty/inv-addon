@@ -37,6 +37,11 @@ class PicnicClientProtocol(Protocol):
     async def get_article(self, article_id: str) -> dict[str, Any]: ...
     async def get_product_page(self, picnic_id: str) -> dict[str, Any]: ...
     async def get_promo_page(self) -> dict[str, Any]: ...
+    async def get_delivery_slots(self) -> dict[str, Any]: ...
+    async def set_delivery_slot(self, slot_id: str) -> dict[str, Any]: ...
+    async def checkout_start(self, mts: int, resolve_key: str | None = None) -> dict[str, Any]: ...
+    async def initiate_payment(self, order_id: str) -> dict[str, Any]: ...
+    async def get_checkout_status(self, order_id: str) -> dict[str, Any]: ...
 
 
 class PicnicNotConfigured(Exception):
@@ -252,6 +257,33 @@ class PicnicClient:
         section links to. Parsed by app.services.picnic.offers.
         """
         return await self._call("_get", "/pages/promo-page-root", add_picnic_headers=True)
+
+    # ── Slot selection / checkout ──
+    # The library has none of these; call the raw Picnic endpoints directly.
+    # The flow is set_delivery_slot -> checkout_start -> initiate_payment -> poll
+    # get_checkout_status; orchestrated by app.services.picnic.checkout.place_order.
+
+    async def get_delivery_slots(self) -> dict[str, Any]:
+        return await self._call("get_delivery_slots")
+
+    async def set_delivery_slot(self, slot_id: str) -> dict[str, Any]:
+        return await self._call("_post", "/cart/set_delivery_slot", {"slot_id": slot_id})
+
+    async def checkout_start(self, mts: int, resolve_key: str | None = None) -> dict[str, Any]:
+        data: dict[str, Any] = {"mts": mts, "oos_article_ids": None}
+        if resolve_key:
+            data["resolve_key"] = resolve_key
+        return await self._call("_post", "/cart/checkout/start", data)
+
+    async def initiate_payment(self, order_id: str) -> dict[str, Any]:
+        data = {"order_id": order_id, "app_return_url": "nl.picnic-supermarkt://payment"}
+        return await self._call("_post", "/cart/checkout/initiate_payment", data)
+
+    async def get_checkout_status(self, order_id: str) -> dict[str, Any]:
+        # Verified live: status is keyed by order_id (the dashed "200-371-1144"
+        # form from checkout/start), NOT the payment transaction_id — the latter
+        # 404s. Shape: {"checkout_status": "FINISHED", "error": {}}.
+        return await self._call("_get", f"/cart/checkout/order/{order_id}/status")
 
 
 # --- FastAPI dependency ---
