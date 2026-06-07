@@ -15,6 +15,7 @@ import type { SelectChangeEvent } from "@mui/material";
 import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
 import type { ImportCandidate, ImportDecision, TrackedProduct } from "../../types";
 import { MatchCandidateList } from "./MatchCandidateList";
+import { PICNIC_IMG_BG } from "../../utils/picnic";
 
 interface Props {
   candidate: ImportCandidate;
@@ -54,7 +55,7 @@ export function ReviewCard({ candidate, storageLocations, onChange, synthTracked
               component="img"
               src={`https://storefront-prod.de.picnicinternational.com/static/images/${candidate.picnic_image_id}/tile-small.png`}
               alt=""
-              sx={{ width: 64, height: 64, objectFit: "contain", flexShrink: 0 }}
+              sx={{ width: 64, height: 64, objectFit: "contain", flexShrink: 0, bgcolor: PICNIC_IMG_BG, borderRadius: 1, p: 0.5 }}
             />
           )}
           <Box sx={{ flex: 1 }}>

@@ -6,6 +6,7 @@ import {
 import { usePicnicOffers } from "../../../hooks/usePicnicOffers";
 import { useRegisterRefresh } from "../../RefreshProvider";
 import { formatPrice } from "../../../utils/format";
+import { PICNIC_IMG_BG } from "../../../utils/picnic";
 import type { OfferItem } from "../../../types";
 
 const imgUrl = (imageId: string | null, size = "medium") =>
@@ -31,7 +32,7 @@ function OfferCard({ offer, onClick }: { offer: OfferItem; onClick: (id: string)
           height="140"
           image={imgUrl(offer.image_id)}
           alt={offer.name}
-          sx={{ objectFit: "contain", p: 1, bgcolor: "#fafafa" }}
+          sx={{ objectFit: "contain", p: 1, bgcolor: PICNIC_IMG_BG }}
         />
         <CardContent sx={{ pb: 1 }}>
           <Typography variant="body2" fontWeight={500} noWrap>{offer.name}</Typography>

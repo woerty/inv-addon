@@ -10,6 +10,7 @@ import {
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
 import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
+import { PICNIC_IMG_BG } from "../../utils/picnic";
 import type { TrackedProduct } from "../../types";
 
 type Props = {
@@ -31,7 +32,7 @@ const TrackedProductCard = ({ item, onEdit, onDelete, onPromote }: Props) => {
             component="img"
             src={`https://storefront-prod.de.picnicinternational.com/static/images/${item.picnic_image_id}/medium.png`}
             alt=""
-            sx={{ width: 56, height: 56, objectFit: "contain" }}
+            sx={{ width: 56, height: 56, objectFit: "contain", bgcolor: PICNIC_IMG_BG, borderRadius: 1, p: 0.5 }}
           />
         )}
         <Box flex={1}>

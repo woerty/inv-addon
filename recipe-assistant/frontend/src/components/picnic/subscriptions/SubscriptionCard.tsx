@@ -2,6 +2,7 @@ import { Box, Card, CardContent, Chip, IconButton, Stack, Typography } from "@mu
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
 import type { TrackedProduct } from "../../../types";
+import { PICNIC_IMG_BG } from "../../../utils/picnic";
 
 const imgUrl = (imageId: string | null) =>
   imageId
@@ -39,7 +40,7 @@ export default function SubscriptionCard({ item, onOrder, onEdit, onDelete }: Su
         <Stack direction="row" alignItems="center" spacing={1.5}>
           {item.picnic_image_id && (
             <Box component="img" src={imgUrl(item.picnic_image_id)} alt={item.name}
-              sx={{ width: 48, height: 48, objectFit: "contain" }} />
+              sx={{ width: 48, height: 48, objectFit: "contain", bgcolor: PICNIC_IMG_BG, borderRadius: 1, p: 0.5 }} />
           )}
           <Box flex={1} minWidth={0}>
             <Typography variant="body1" fontWeight={500} noWrap>
