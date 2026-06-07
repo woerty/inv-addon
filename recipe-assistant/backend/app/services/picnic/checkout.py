@@ -105,15 +105,16 @@ async def place_order(
         raise PicnicCheckoutError(message)
 
     payment = await client.initiate_payment(order_id)
+    # On success this is "" (empty string); a real 3DS challenge carries a URL.
     if payment.get("issuer_authentication_url"):
         raise PicnicCheckoutError(
             "Diese Bestellung erfordert eine Zahlungsbestätigung (3-D Secure). "
             "Bitte in der Picnic-App abschließen."
         )
 
-    transaction_id = payment.get("transaction_id") or payment.get("payment_id") or order_id
+    # Status is polled by order_id (NOT the payment transaction_id, which 404s).
     for attempt in range(max_attempts):
-        raw = await client.get_checkout_status(transaction_id)
+        raw = await client.get_checkout_status(order_id)
         status = (raw.get("checkout_status") or raw.get("status") or "").upper()
         if status in _DONE_STATUSES:
             return OrderPlacedResult(

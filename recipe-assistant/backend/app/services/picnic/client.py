@@ -41,7 +41,7 @@ class PicnicClientProtocol(Protocol):
     async def set_delivery_slot(self, slot_id: str) -> dict[str, Any]: ...
     async def checkout_start(self, mts: int, resolve_key: str | None = None) -> dict[str, Any]: ...
     async def initiate_payment(self, order_id: str) -> dict[str, Any]: ...
-    async def get_checkout_status(self, transaction_id: str) -> dict[str, Any]: ...
+    async def get_checkout_status(self, order_id: str) -> dict[str, Any]: ...
 
 
 class PicnicNotConfigured(Exception):
@@ -279,8 +279,11 @@ class PicnicClient:
         data = {"order_id": order_id, "app_return_url": "nl.picnic-supermarkt://payment"}
         return await self._call("_post", "/cart/checkout/initiate_payment", data)
 
-    async def get_checkout_status(self, transaction_id: str) -> dict[str, Any]:
-        return await self._call("_get", f"/cart/checkout/{transaction_id}/status")
+    async def get_checkout_status(self, order_id: str) -> dict[str, Any]:
+        # Verified live: status is keyed by order_id (the dashed "200-371-1144"
+        # form from checkout/start), NOT the payment transaction_id — the latter
+        # 404s. Shape: {"checkout_status": "FINISHED", "error": {}}.
+        return await self._call("_get", f"/cart/checkout/order/{order_id}/status")
 
 
 # --- FastAPI dependency ---

@@ -128,7 +128,7 @@ class FakePicnicClient:
         self.initiate_payment_calls.append(order_id)
         return self.initiate_payment_result
 
-    async def get_checkout_status(self, transaction_id: str) -> dict[str, Any]:
+    async def get_checkout_status(self, order_id: str) -> dict[str, Any]:
         if self.status_responses:
             idx = min(self._status_idx, len(self.status_responses) - 1)
             self._status_idx += 1
