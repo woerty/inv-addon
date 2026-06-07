@@ -121,7 +121,7 @@ def _seed_pending_delivery(client: FakePicnicClient, picnic_id: str, qty: int) -
     """Inject a non-completed delivery containing `qty` of `picnic_id`."""
     client.deliveries_summary = [
         {
-            "id": "del-pending-1",
+            # Real Picnic /deliveries/summary returns "delivery_id", not "id".
             "delivery_id": "del-pending-1",
             "status": "DELIVERING",
             "delivery_time": {

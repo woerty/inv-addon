@@ -27,7 +27,12 @@ async def parse_pending_orders(
     quantity_map: dict[str, int] = defaultdict(int)
 
     for summary in pending:
-        delivery_id = summary["id"]
+        # Picnic's /deliveries/summary returns "delivery_id" (fall back to "id"
+        # in case the shape ever changes). Skip rather than crash the whole batch.
+        delivery_id = summary.get("delivery_id") or summary.get("id")
+        if not delivery_id:
+            log.warning("Delivery summary without id, skipping: %s", summary)
+            continue
         try:
             detail = await client.get_delivery(delivery_id)
         except Exception:
