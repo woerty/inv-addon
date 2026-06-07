@@ -4,6 +4,7 @@ import { usePicnicStatus } from "../hooks/usePicnic";
 import { usePicnicCart } from "../hooks/usePicnicCart";
 import { usePicnicPendingOrders } from "../hooks/usePicnicOrders";
 import { useTrackedProducts } from "../hooks/useTrackedProducts";
+import { useRegisterRefresh } from "../components/RefreshProvider";
 import StoreTab from "../components/picnic/store/StoreTab";
 import OffersTab from "../components/picnic/offers/OffersTab";
 import CartTab from "../components/picnic/cart/CartTab";
@@ -44,6 +45,11 @@ export default function PicnicStorePage() {
   const handleCartClear = useCallback(async () => {
     await cartClear();
   }, [cartClear]);
+
+  const refreshPicnic = useCallback(async () => {
+    await Promise.all([cartRefetch(), ordersRefetch()]);
+  }, [cartRefetch, ordersRefetch]);
+  useRegisterRefresh(refreshPicnic);
 
   const handleOrderPlaced = useCallback(async () => {
     await Promise.all([cartRefetch(), ordersRefetch()]);

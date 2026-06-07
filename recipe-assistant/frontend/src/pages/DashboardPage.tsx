@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Box, Divider, ToggleButton, ToggleButtonGroup, Typography, CircularProgress } from "@mui/material";
 import { useDashboard, useProductDetail } from "../hooks/useDashboard";
 import { usePicnicPendingOrders } from "../hooks/usePicnicOrders";
@@ -14,22 +14,34 @@ import CategoryBreakdown from "../components/dashboard/CategoryBreakdown";
 import RestockCostsWidget from "../components/dashboard/RestockCostsWidget";
 import StorageLocations from "../components/dashboard/StorageLocations";
 import ProductDetail from "../components/dashboard/ProductDetail";
+import { useRegisterRefresh } from "../components/RefreshProvider";
 import type { Cart } from "../types";
 
 const DashboardPage = () => {
   const [days, setDays] = useState(30);
-  const { data, loading } = useDashboard(days);
+  const { data, loading, refetch: dashboardRefetch } = useDashboard(days);
   const productDetail = useProductDetail();
   const { status: picnicStatus } = usePicnicStatus();
-  const { orders } = usePicnicPendingOrders();
+  const { orders, refetch: ordersRefetch } = usePicnicPendingOrders();
 
   // Fetch cart only if Picnic is enabled
   const [cart, setCart] = useState<Cart | null>(null);
-  useEffect(() => {
-    if (picnicStatus?.enabled) {
-      getCart().then(setCart).catch(() => {});
+  const loadCart = useCallback(async () => {
+    if (!picnicStatus?.enabled) return;
+    try {
+      setCart(await getCart());
+    } catch {
+      /* ignore */
     }
   }, [picnicStatus?.enabled]);
+  useEffect(() => {
+    loadCart();
+  }, [loadCart]);
+
+  const refreshDashboard = useCallback(async () => {
+    await Promise.all([dashboardRefetch(), ordersRefetch(), loadCart()]);
+  }, [dashboardRefetch, ordersRefetch, loadCart]);
+  useRegisterRefresh(refreshDashboard);
 
   const handleProductSelect = (barcode: string) => {
     productDetail.fetch(barcode, days);

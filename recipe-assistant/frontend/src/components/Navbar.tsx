@@ -12,6 +12,7 @@ import {
   Typography,
 } from "@mui/material";
 import MenuIcon from "@mui/icons-material/Menu";
+import RefreshIcon from "@mui/icons-material/Refresh";
 import DashboardIcon from "@mui/icons-material/Dashboard";
 import InventoryIcon from "@mui/icons-material/Inventory2";
 import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
@@ -23,6 +24,7 @@ import StorefrontIcon from "@mui/icons-material/Storefront";
 import LoginIcon from "@mui/icons-material/Login";
 import { useNavigate, useLocation } from "react-router-dom";
 import { usePicnicStatus } from "../hooks/usePicnic";
+import { useRefresh } from "./RefreshProvider";
 
 const NAV_ITEMS = [
   { path: "/", label: "Dashboard", icon: <DashboardIcon /> },
@@ -39,6 +41,7 @@ const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { status } = usePicnicStatus();
+  const { refreshAll, refreshing, canRefresh } = useRefresh();
 
   const navItems = [
     ...NAV_ITEMS,
@@ -78,6 +81,24 @@ const Navbar = () => {
           <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>
             Recipe Assistant
           </Typography>
+          <IconButton
+            color="inherit"
+            edge="end"
+            onClick={() => refreshAll()}
+            disabled={!canRefresh || refreshing}
+            title="Daten aktualisieren"
+            sx={{
+              "@keyframes navbar-spin": {
+                from: { transform: "rotate(0deg)" },
+                to: { transform: "rotate(360deg)" },
+              },
+              ...(refreshing && {
+                "& svg": { animation: "navbar-spin 0.8s linear infinite" },
+              }),
+            }}
+          >
+            <RefreshIcon />
+          </IconButton>
         </Toolbar>
       </AppBar>
 

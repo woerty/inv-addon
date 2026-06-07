@@ -4,6 +4,7 @@ import {
   CircularProgress, Grid, Stack, TextField, Typography,
 } from "@mui/material";
 import { usePicnicOffers } from "../../../hooks/usePicnicOffers";
+import { useRegisterRefresh } from "../../RefreshProvider";
 import { formatPrice } from "../../../utils/format";
 import type { OfferItem } from "../../../types";
 
@@ -60,8 +61,9 @@ interface OffersTabProps {
 }
 
 export default function OffersTab({ onProductClick }: OffersTabProps) {
-  const { offers, loading } = usePicnicOffers();
+  const { offers, loading, refetch } = usePicnicOffers();
   const [filter, setFilter] = useState("");
+  useRegisterRefresh(refetch);
 
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
