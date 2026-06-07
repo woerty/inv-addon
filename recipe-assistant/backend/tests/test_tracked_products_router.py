@@ -180,8 +180,9 @@ async def test_patch_nonexistent_returns_404(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_feature_disabled_returns_503(client: AsyncClient, monkeypatch):
-    monkeypatch.delenv("PICNIC_MAIL", raising=False)
-    monkeypatch.delenv("PICNIC_PASSWORD", raising=False)
+    # Force-empty (env overrides .env) so a populated dev .env can't enable it.
+    monkeypatch.setenv("PICNIC_MAIL", "")
+    monkeypatch.setenv("PICNIC_PASSWORD", "")
     from app.config import get_settings
 
     get_settings.cache_clear()

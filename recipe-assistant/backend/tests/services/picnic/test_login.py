@@ -58,12 +58,10 @@ def patched_picnic_api(monkeypatch, tmp_path):
 
     monkeypatch.setattr(python_picnic_api2, "PicnicAPI", _FakePicnicAPI)
 
-    import app.services.picnic.client as client_mod
-
     token_path = tmp_path / "picnic_token.json"
-    monkeypatch.setattr(client_mod, "TOKEN_CACHE_PATH", token_path)
 
-    # Force settings to have credentials
+    # Force settings to have credentials + a writable token path
+    monkeypatch.setenv("PICNIC_TOKEN_PATH", str(token_path))
     monkeypatch.setenv("PICNIC_MAIL", "test@example.com")
     monkeypatch.setenv("PICNIC_PASSWORD", "secret")
     from app.config import get_settings
@@ -132,9 +130,11 @@ async def test_wrong_code_raises_invalid_code(patched_picnic_api):
 
 @pytest.mark.asyncio
 async def test_start_without_credentials_raises(monkeypatch, patched_picnic_api):
-    monkeypatch.delenv("PICNIC_MAIL", raising=False)
-    monkeypatch.delenv("PICNIC_EMAIL", raising=False)
-    monkeypatch.delenv("PICNIC_PASSWORD", raising=False)
+    # Force-empty (env overrides .env) so a developer's populated .env can't make
+    # this look "configured".
+    monkeypatch.setenv("PICNIC_MAIL", "")
+    monkeypatch.setenv("PICNIC_EMAIL", "")
+    monkeypatch.setenv("PICNIC_PASSWORD", "")
     from app.config import get_settings
 
     get_settings.cache_clear()

@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     picnic_email: str = Field(default="", validation_alias=AliasChoices("PICNIC_MAIL", "PICNIC_EMAIL"))
     picnic_password: str = ""
     picnic_country_code: str = "DE"
+    # Where the cached Picnic auth token lives. Default is the HA addon's
+    # persistent /data dir; local dev overrides it via PICNIC_TOKEN_PATH in .env
+    # (e.g. ./.picnic_token.json) since there is no writable /data on the host.
+    picnic_token_path: str = "/data/picnic_token.json"
     scanner_token: str = ""
     environment: str = "development"
 

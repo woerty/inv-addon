@@ -10,7 +10,15 @@ from app.config import get_settings
 
 log = logging.getLogger("picnic.client")
 
-TOKEN_CACHE_PATH = Path("/data/picnic_token.json")
+
+def _token_path() -> Path:
+    """Resolve the Picnic token cache location.
+
+    Defaults to the HA addon's persistent /data dir; PICNIC_TOKEN_PATH (read
+    from .env via Settings) overrides it for local dev, where /data is not
+    writable. Resolved per-call so tests/env changes take effect immediately.
+    """
+    return Path(get_settings().picnic_token_path)
 
 
 class PicnicClientProtocol(Protocol):
@@ -50,16 +58,17 @@ class PicnicReauthRequired(Exception):
 
 
 def save_token(token: str) -> None:
-    """Persist the auth token to TOKEN_CACHE_PATH with chmod 600.
+    """Persist the auth token to the token cache path with chmod 600.
 
     Shared between the runtime PicnicClient (after a successful silent
     re-login) and the web-based PicnicLoginSession (after a successful
     interactive 2FA handshake).
     """
     try:
-        TOKEN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        TOKEN_CACHE_PATH.write_text(json.dumps({"token": token}))
-        TOKEN_CACHE_PATH.chmod(0o600)
+        path = _token_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"token": token}))
+        path.chmod(0o600)
     except Exception as e:
         log.warning("could not persist picnic token: %s", e)
 
@@ -96,9 +105,10 @@ class PicnicClient:
         self._lock = asyncio.Lock()
 
     def _load_token(self) -> str | None:
-        if TOKEN_CACHE_PATH.exists():
+        path = _token_path()
+        if path.exists():
             try:
-                return json.loads(TOKEN_CACHE_PATH.read_text()).get("token")
+                return json.loads(path.read_text()).get("token")
             except Exception:
                 return None
         return None
@@ -163,7 +173,7 @@ class PicnicClient:
                 log.info("picnic token rejected, attempting fresh login: %s", e)
                 # Invalidate cached token and retry once
                 try:
-                    TOKEN_CACHE_PATH.unlink(missing_ok=True)
+                    _token_path().unlink(missing_ok=True)
                 except Exception:
                     pass
                 await self._ensure_ready(force_relogin=True)

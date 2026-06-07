@@ -3,29 +3,29 @@
 Usage (once per installation):
     python -m app.services.picnic.setup
 
-Reads credentials from env vars (PICNIC_MAIL or PICNIC_EMAIL, PICNIC_PASSWORD,
-PICNIC_COUNTRY_CODE). Performs the full login flow, handles SMS 2FA by
-prompting on stdin, and writes the resulting auth token to
-/data/picnic_token.json (or $PICNIC_TOKEN_PATH if set, for local dev).
+Reads credentials and the token path from Settings, i.e. from the .env file
+(PICNIC_MAIL or PICNIC_EMAIL, PICNIC_PASSWORD, PICNIC_COUNTRY_CODE,
+PICNIC_TOKEN_PATH) or real env vars. Performs the full login flow, handles 2FA
+by prompting on stdin, and writes the resulting auth token to the configured
+token path (default /data/picnic_token.json; for local dev set
+PICNIC_TOKEN_PATH=./.picnic_token.json in .env).
 """
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
 from python_picnic_api2 import PicnicAPI, Picnic2FAError, Picnic2FARequired
 
-
-def _token_path() -> Path:
-    return Path(os.environ.get("PICNIC_TOKEN_PATH", "/data/picnic_token.json"))
+from app.config import get_settings
 
 
 def main() -> int:
-    email = os.environ.get("PICNIC_MAIL") or os.environ.get("PICNIC_EMAIL") or ""
-    password = os.environ.get("PICNIC_PASSWORD") or ""
-    country = os.environ.get("PICNIC_COUNTRY_CODE") or "DE"
+    settings = get_settings()
+    email = settings.picnic_email
+    password = settings.picnic_password
+    country = settings.picnic_country_code or "DE"
 
     if not email or not password:
         print("error: set PICNIC_MAIL and PICNIC_PASSWORD in the environment", file=sys.stderr)
@@ -54,7 +54,7 @@ def main() -> int:
         print("error: no auth token in session after login", file=sys.stderr)
         return 1
 
-    path = _token_path()
+    path = Path(settings.picnic_token_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"token": token}))
     path.chmod(0o600)

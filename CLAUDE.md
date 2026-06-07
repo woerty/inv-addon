@@ -30,6 +30,21 @@ alembic revision --autogenerate -m "desc"  # create new migration
 
 pytest is configured with `asyncio_mode = "auto"` in pyproject.toml -- no need for `@pytest.mark.asyncio` on tests.
 
+#### Local Picnic auth (dev)
+
+To exercise real Picnic endpoints locally (no token-copying from the HA host):
+
+```bash
+cp .env.example .env          # then fill PICNIC_MAIL / PICNIC_PASSWORD
+python -m app.services.picnic.setup   # interactive 2FA, writes the token
+python -m uvicorn app.main:app --reload
+```
+
+The token path comes from `PICNIC_TOKEN_PATH` (Settings/.env). It defaults to
+`/data/picnic_token.json` (the HA addon's persistent dir) and is overridden to a
+local file in dev. Both the setup CLI and the runtime client read this same
+setting, so a single `.env` configures everything.
+
 ### Frontend (from `recipe-assistant/frontend/`)
 
 ```bash

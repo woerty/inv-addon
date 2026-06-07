@@ -7,3 +7,8 @@ dist/
 build/
 .env
 *.db
+# Local Picnic auth token written by `python -m app.services.picnic.setup`
+.picnic_token.json
+.picnic_2fa_state.json
+debug_dump_delivery.py
+picnic_2fa.py

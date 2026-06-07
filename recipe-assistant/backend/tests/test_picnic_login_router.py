@@ -19,10 +19,8 @@ def setup_login_env(monkeypatch, tmp_path):
 
     monkeypatch.setattr(python_picnic_api2, "PicnicAPI", _FakePicnicAPI)
 
-    import app.services.picnic.client as client_mod
-
     token_path = tmp_path / "picnic_token.json"
-    monkeypatch.setattr(client_mod, "TOKEN_CACHE_PATH", token_path)
+    monkeypatch.setenv("PICNIC_TOKEN_PATH", str(token_path))
 
     monkeypatch.setenv("PICNIC_MAIL", "test@example.com")
     monkeypatch.setenv("PICNIC_PASSWORD", "secret")
@@ -94,9 +92,10 @@ async def test_wrong_otp_returns_400(client: AsyncClient):
 async def test_login_endpoints_503_when_feature_disabled(
     client: AsyncClient, monkeypatch
 ):
-    monkeypatch.delenv("PICNIC_MAIL", raising=False)
-    monkeypatch.delenv("PICNIC_EMAIL", raising=False)
-    monkeypatch.delenv("PICNIC_PASSWORD", raising=False)
+    # Force-empty (env overrides .env) so a populated dev .env can't enable it.
+    monkeypatch.setenv("PICNIC_MAIL", "")
+    monkeypatch.setenv("PICNIC_EMAIL", "")
+    monkeypatch.setenv("PICNIC_PASSWORD", "")
     from app.config import get_settings
 
     get_settings.cache_clear()

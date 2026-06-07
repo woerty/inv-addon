@@ -33,6 +33,27 @@ async def setup_db():
 
 
 @pytest.fixture(autouse=True)
+def isolate_picnic_credentials(monkeypatch):
+    """Keep a developer's real .env credentials out of the test suite.
+
+    Settings reads backend/.env, which on a dev machine may contain real Picnic
+    credentials + token path. That would flip the Picnic feature flag on and even
+    let tests hit the live API. Force everything empty by default (env vars
+    override .env); tests that need credentials set them explicitly afterward
+    (pytest runs autouse fixtures before explicitly-requested ones).
+    """
+    from app.config import get_settings
+
+    monkeypatch.setenv("PICNIC_MAIL", "")
+    monkeypatch.setenv("PICNIC_EMAIL", "")
+    monkeypatch.setenv("PICNIC_PASSWORD", "")
+    monkeypatch.setenv("PICNIC_TOKEN_PATH", "/tmp/nonexistent-test-picnic-token.json")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def mock_lookup_barcode():
     """Mock the barcode lookup to avoid real HTTP calls during tests."""
     with patch(
