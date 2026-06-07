@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -30,6 +30,7 @@ import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import { IconButton } from "@mui/material";
 import { useInventory } from "../hooks/useInventory";
 import { useNotification } from "../components/NotificationProvider";
+import { useRegisterRefresh } from "../components/RefreshProvider";
 import { exportData, importData, relookupBarcode, relookupAllUnknown, backfillImages, barcodeSheetUrl } from "../api/client";
 import { usePicnicStatus } from "../hooks/usePicnic";
 import { usePicnicPendingOrders } from "../hooks/usePicnicOrders";
@@ -183,6 +184,12 @@ const InventoryPage = () => {
   };
   const [sortBy, setSortBy] = useState<SortKey>("name");
   const [order, setOrder] = useState<Order>("asc");
+
+  const refreshInventory = useCallback(
+    () => refetch(search, sortBy, order),
+    [refetch, search, sortBy, order],
+  );
+  useRegisterRefresh(refreshInventory);
   const [editFields, setEditFields] = useState<
     Record<number, { quantity?: string; storage_location?: string; expiration_date?: string }>
   >({});

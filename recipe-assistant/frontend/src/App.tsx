@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { NotificationProvider } from "./components/NotificationProvider";
+import { RefreshProvider } from "./components/RefreshProvider";
 import Navbar from "./components/Navbar";
 import DashboardPage from "./pages/DashboardPage";
 import InventoryPage from "./pages/InventoryPage";
@@ -42,7 +43,9 @@ const App = () => {
   return (
     <BrowserRouter basename={basePath}>
       <NotificationProvider>
-        <AppContent />
+        <RefreshProvider>
+          <AppContent />
+        </RefreshProvider>
       </NotificationProvider>
     </BrowserRouter>
   );
