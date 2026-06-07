@@ -35,6 +35,7 @@ from app.schemas.picnic import (
     ImportCommitRequest,
     ImportCommitResponse,
     ImportFetchResponse,
+    OffersResponse,
     PendingOrdersResponse,
     PicnicLoginSendCodeRequest,
     PicnicLoginSendCodeResponse,
@@ -53,6 +54,7 @@ from app.services.picnic.cart import (
     parse_cart_response,
 )
 from app.services.picnic.catalog import PicnicProductData, get_product, upsert_product
+from app.services.picnic.offers import get_offers
 from app.services.picnic.orders import parse_pending_orders
 from app.services.picnic.client import (
     PicnicClientProtocol,
@@ -422,6 +424,24 @@ async def get_pending_orders(
     except Exception:
         log.exception("Failed to fetch pending orders")
         return PendingOrdersResponse(orders=[], quantity_map={})
+
+
+# ── Offers ────────────────────────────────────────────────────────────────────
+
+@router.get("/offers", response_model=OffersResponse)
+async def get_current_offers(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    _: None = Depends(_require_enabled),
+):
+    try:
+        return await get_offers(client)
+    except PicnicNotConfigured:
+        raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
+    except Exception:
+        log.exception("Failed to fetch offers")
+        return OffersResponse(offers=[])
 
 
 

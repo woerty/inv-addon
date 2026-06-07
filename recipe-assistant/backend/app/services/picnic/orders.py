@@ -59,9 +59,16 @@ async def parse_pending_orders(
                     quantity=fi["quantity"],
                     image_id=fi.get("image_id"),
                     price_cents=fi.get("price_cents"),
+                    promo_price_cents=fi.get("promo_price_cents"),
+                    promo_text=fi.get("promo_text"),
                 )
             else:
                 existing.quantity += fi["quantity"]
+                # Keep the promo if any merged line carries one.
+                if existing.promo_price_cents is None:
+                    existing.promo_price_cents = fi.get("promo_price_cents")
+                if not existing.promo_text:
+                    existing.promo_text = fi.get("promo_text")
         items = list(merged.values())
 
         # Prefer Picnic's authoritative per-order totals (they include

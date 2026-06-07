@@ -5,6 +5,7 @@ import { usePicnicCart } from "../hooks/usePicnicCart";
 import { usePicnicPendingOrders } from "../hooks/usePicnicOrders";
 import { useTrackedProducts } from "../hooks/useTrackedProducts";
 import StoreTab from "../components/picnic/store/StoreTab";
+import OffersTab from "../components/picnic/offers/OffersTab";
 import CartTab from "../components/picnic/cart/CartTab";
 import OrdersTab from "../components/picnic/orders/OrdersTab";
 import SubscriptionsTab from "../components/picnic/subscriptions/SubscriptionsTab";
@@ -56,15 +57,17 @@ export default function PicnicStorePage() {
     <Container maxWidth="lg" sx={{ mt: 2, mb: 4 }}>
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab label="Store" />
+        <Tab label="Angebote" />
         <Tab label={<Badge badgeContent={cart?.total_items ?? 0} color="primary" max={99}><Box sx={{ px: 1 }}>Warenkorb</Box></Badge>} />
         <Tab label="Bestellungen" />
         <Tab label="Abos" />
       </Tabs>
 
       {tab === 0 && <StoreTab cartQuantities={cartQuantities} orderQuantities={orderQuantities} inventoryQuantities={inventoryQuantities} subscribedIds={subscribedIds} onProductClick={setDetailId} />}
-      {tab === 1 && <CartTab cart={cart} loading={cartLoading} onAdd={handleCartAdd} onRemove={handleCartRemove} onClear={handleCartClear} onProductClick={setDetailId} />}
-      {tab === 2 && <OrdersTab orders={orders} loading={ordersLoading} />}
-      {tab === 3 && <SubscriptionsTab orderQuantities={orderQuantities} />}
+      {tab === 1 && <OffersTab onProductClick={setDetailId} />}
+      {tab === 2 && <CartTab cart={cart} loading={cartLoading} onAdd={handleCartAdd} onRemove={handleCartRemove} onClear={handleCartClear} onProductClick={setDetailId} />}
+      {tab === 3 && <OrdersTab orders={orders} loading={ordersLoading} />}
+      {tab === 4 && <SubscriptionsTab orderQuantities={orderQuantities} />}
 
       <ProductDetailModal
         picnicId={detailId}

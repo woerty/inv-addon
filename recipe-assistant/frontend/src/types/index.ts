@@ -127,6 +127,8 @@ export interface PendingOrderItem {
   quantity: number;
   image_id: string | null;
   price_cents: number | null;
+  promo_price_cents: number | null;
+  promo_text: string | null;
 }
 
 export interface PendingOrder {
@@ -136,6 +138,20 @@ export interface PendingOrder {
   total_items: number;
   total_price_cents: number | null;
   items: PendingOrderItem[];
+}
+
+export interface OfferItem {
+  picnic_id: string;
+  name: string;
+  image_id: string | null;
+  unit_quantity: string | null;
+  price_cents: number | null;
+  original_price_cents: number | null;
+  promo_label: string | null;
+}
+
+export interface OffersResponse {
+  offers: OfferItem[];
 }
 
 export interface PendingOrdersResponse {

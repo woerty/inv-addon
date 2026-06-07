@@ -6,6 +6,7 @@ from tests.fixtures.picnic.sample_deliveries import (
     SAMPLE_CART_EMPTY,
     SAMPLE_DELIVERIES_SUMMARY,
     SAMPLE_DELIVERY_DETAIL,
+    SAMPLE_PROMO_PAGE,
     SAMPLE_SEARCH_MILK,
     SAMPLE_USER,
 )
@@ -36,6 +37,7 @@ class FakePicnicClient:
         self.articles: dict[str, dict[str, Any]] = {}
         # picnic_id -> raw product-details page (for get_product_page)
         self.product_pages: dict[str, dict[str, Any]] = {}
+        self.promo_page: dict[str, Any] = SAMPLE_PROMO_PAGE
 
     async def search(self, query: str) -> list[dict[str, Any]]:
         return self.search_results.get(query.lower(), [])
@@ -93,6 +95,9 @@ class FakePicnicClient:
 
     async def get_product_page(self, picnic_id: str) -> dict[str, Any]:
         return self.product_pages.get(picnic_id, {})
+
+    async def get_promo_page(self) -> dict[str, Any]:
+        return self.promo_page
 
 
 # Static conformance check: ensures FakePicnicClient stays in sync with
