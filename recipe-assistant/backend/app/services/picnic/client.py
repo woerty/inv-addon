@@ -36,6 +36,7 @@ class PicnicClientProtocol(Protocol):
     async def get_categories(self, depth: int = 0) -> list[dict[str, Any]]: ...
     async def get_article(self, article_id: str) -> dict[str, Any]: ...
     async def get_product_page(self, picnic_id: str) -> dict[str, Any]: ...
+    async def get_promo_page(self) -> dict[str, Any]: ...
 
 
 class PicnicNotConfigured(Exception):
@@ -243,6 +244,14 @@ class PicnicClient:
             "&show_category_action=true"
         )
         return await self._call("_get", path, add_picnic_headers=True)
+
+    async def get_promo_page(self) -> dict[str, Any]:
+        """Fetch the raw 'Diese Woche im Angebot' PML page (all current offers).
+
+        The library has no offers endpoint; this is the page the app's promo
+        section links to. Parsed by app.services.picnic.offers.
+        """
+        return await self._call("_get", "/pages/promo-page-root", add_picnic_headers=True)
 
 
 # --- FastAPI dependency ---

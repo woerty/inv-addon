@@ -13,6 +13,7 @@ import type {
   PicnicSearchResult,
   Cart,
   PendingOrdersResponse,
+  OffersResponse,
   ProductDetail,
   TrackedProduct,
   TrackedProductCreate,
@@ -236,6 +237,9 @@ export const getPendingOrders = () =>
 
 export const getProductDetail = (picnicId: string) =>
   request<ProductDetail>(`/picnic/products/${encodeURIComponent(picnicId)}`);
+
+export const getOffers = () =>
+  request<OffersResponse>("/picnic/offers");
 
 
 export const startPicnicLogin = () =>

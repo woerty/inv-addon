@@ -17,13 +17,21 @@ def _make_delivery(delivery_id: str, status: str, items: list[dict]) -> dict:
     }
 
 
-def _make_item(picnic_id: str, name: str, qty: int, unit_price: int = 199) -> dict:
+def _make_item(
+    picnic_id: str,
+    name: str,
+    qty: int,
+    unit_price: int = 199,
+    promo_total: int | None = None,
+    promo_text: str | None = None,
+) -> dict:
     """Returns an ORDER_LINE dict as expected by _flatten_delivery_items.
 
     Mirrors real Picnic shape: the line carries the line total; the article
     carries a sentinel price (ignored) plus image_ids and a QUANTITY decorator.
+    Offers are LINE-level PRICE/PROMO decorators.
     """
-    return {
+    line: dict = {
         "type": "ORDER_LINE",
         "id": f"line-{picnic_id}",
         "price": unit_price * qty,
@@ -43,6 +51,14 @@ def _make_item(picnic_id: str, name: str, qty: int, unit_price: int = 199) -> di
             }
         ],
     }
+    decos = []
+    if promo_total is not None:
+        decos.append({"type": "PRICE", "display_price": promo_total})
+    if promo_text is not None:
+        decos.append({"type": "PROMO", "text": promo_text})
+    if decos:
+        line["decorators"] = decos
+    return line
 
 
 async def test_parse_pending_orders_filters_completed():
@@ -147,6 +163,31 @@ async def test_parse_pending_orders_delivery_time_falls_back_to_slot():
     result = await parse_pending_orders(client)
     assert result.orders[0].delivery_time is not None
     assert result.orders[0].delivery_time.hour == 15
+
+
+async def test_parse_pending_orders_extracts_promo():
+    """LINE-level PRICE/PROMO decorators surface as per-unit promo price + text."""
+    client = FakePicnicClient()
+    client.deliveries_summary = [{"delivery_id": "d1", "status": "CURRENT"}]
+    # qty 2, regular line 458 (unit 229); promo line total 366 (unit 183).
+    item = _make_item("s100", "Baguette", 2, unit_price=229,
+                      promo_total=366, promo_text="-40% auf 2. Artikel")
+    client.delivery_details = {"d1": _make_delivery("d1", "CURRENT", [item])}
+    result = await parse_pending_orders(client)
+    it = result.orders[0].items[0]
+    assert it.price_cents == 229
+    assert it.promo_price_cents == 183
+    assert it.promo_text == "-40% auf 2. Artikel"
+
+
+async def test_parse_pending_orders_ignores_non_discount_price_decorator():
+    """A PRICE decorator that doesn't undercut the regular price is not a promo."""
+    client = FakePicnicClient()
+    client.deliveries_summary = [{"delivery_id": "d1", "status": "CURRENT"}]
+    item = _make_item("s100", "X", 1, unit_price=199, promo_total=199)
+    client.delivery_details = {"d1": _make_delivery("d1", "CURRENT", [item])}
+    result = await parse_pending_orders(client)
+    assert result.orders[0].items[0].promo_price_cents is None
 
 
 async def test_parse_pending_orders_empty_when_all_completed():

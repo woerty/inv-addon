@@ -65,6 +65,22 @@ def _flatten_delivery_items(detail: dict[str, Any]) -> list[dict[str, Any]]:
                 line_total = line.get("display_price")
             unit_price = round(line_total / qty) if isinstance(line_total, int) and qty else None
 
+            # Offers live in LINE-level decorators: PRICE carries the discounted
+            # line total, PROMO carries the human label ("-40% auf 2. Artikel").
+            promo_total = None
+            promo_text = None
+            for deco in line.get("decorators", []):
+                if not isinstance(deco, dict):
+                    continue
+                if deco.get("type") == "PRICE" and isinstance(deco.get("display_price"), int):
+                    promo_total = deco["display_price"]
+                elif deco.get("type") == "PROMO" and deco.get("text"):
+                    promo_text = deco["text"]
+            promo_price = round(promo_total / qty) if isinstance(promo_total, int) and qty else None
+            # Only a real discount if it actually undercuts the regular price.
+            if promo_price is not None and unit_price is not None and promo_price >= unit_price:
+                promo_price = None
+
             # Articles expose `image_ids` (list); fall back to the older `image_id`.
             image_id = None
             image_ids = product.get("image_ids")
@@ -80,6 +96,8 @@ def _flatten_delivery_items(detail: dict[str, Any]) -> list[dict[str, Any]]:
                     "unit_quantity": product.get("unit_quantity"),
                     "image_id": image_id,
                     "price_cents": unit_price,
+                    "promo_price_cents": promo_price,
+                    "promo_text": promo_text,
                     "quantity": qty,
                 }
             )

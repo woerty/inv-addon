@@ -99,6 +99,66 @@ SAMPLE_SEARCH_MILK = [
     },
 ]
 
+# Shaped like /pages/promo-page-root: SELLING_UNIT_TILE.sellingUnit is
+# self-contained; the strikethrough/label live in a paired analytics promotion
+# context (product_id + promotion). Nesting is irrelevant — the parser walks.
+SAMPLE_PROMO_PAGE = {
+    "type": "PAGE",
+    "child": {
+        "type": "BLOCK",
+        "children": [
+            {
+                "type": "PML",
+                "id": "selling-unit-s100-tile-PromoBox",
+                "analytics": {
+                    "contexts": [
+                        {"data": {"product_id": "s100"}, "schema": "iglu:.../product/1-0-0"},
+                        {
+                            "data": {
+                                "promotion_id": "p1",
+                                "promotion_label": "20% Rabatt",
+                                "price": 143,
+                                "strikethrough_price": 179,
+                                "show_strikethrough_price": True,
+                            },
+                            "schema": "iglu:.../promotion/1-1-0",
+                        },
+                    ]
+                },
+            },
+            {
+                "type": "SELLING_UNIT_TILE",
+                "sellingUnit": {
+                    "id": "s100",
+                    "name": "Gut&Günstig Gouda gerieben",
+                    "image_id": "img-100",
+                    "display_price": 143,
+                    "unit_quantity": "250g",
+                },
+            },
+            {
+                "type": "PML",
+                "analytics": {
+                    "contexts": [
+                        {"data": {"product_id": "s200"}, "schema": "iglu:.../product/1-0-0"},
+                        {"data": {"promotion_label": "jetzt 0.99€"}, "schema": "iglu:.../promotion/1-1-0"},
+                    ]
+                },
+            },
+            {
+                "type": "SELLING_UNIT_TILE",
+                "sellingUnit": {
+                    "id": "s200",
+                    "name": "Ja! Toastbrot",
+                    "image_id": "img-200",
+                    "display_price": 99,
+                    "unit_quantity": "1 Stück",
+                },
+            },
+        ],
+    },
+}
+
 SAMPLE_USER = {
     "user_id": "u-1",
     "firstname": "Test",

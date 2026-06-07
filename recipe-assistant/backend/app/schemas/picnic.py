@@ -150,7 +150,9 @@ class PendingOrderItem(BaseModel):
     name: str
     quantity: int
     image_id: str | None = None
-    price_cents: int | None = None
+    price_cents: int | None = None  # regular per-unit price
+    promo_price_cents: int | None = None  # discounted per-unit price, if on offer
+    promo_text: str | None = None  # e.g. "-40% auf 2. Artikel"
 
 
 class PendingOrder(BaseModel):
@@ -165,6 +167,22 @@ class PendingOrder(BaseModel):
 class PendingOrdersResponse(BaseModel):
     orders: list[PendingOrder]
     quantity_map: dict[str, int]
+
+
+# ── Offers ────────────────────────────────────────────────────────
+
+class OfferItem(BaseModel):
+    picnic_id: str
+    name: str
+    image_id: str | None = None
+    unit_quantity: str | None = None
+    price_cents: int | None = None  # current (discounted) price
+    original_price_cents: int | None = None  # strikethrough price, if shown
+    promo_label: str | None = None  # e.g. "20% Rabatt", "jetzt 0.99€"
+
+
+class OffersResponse(BaseModel):
+    offers: list[OfferItem]
 
 
 # ── Product Detail ────────────────────────────────────────────────

@@ -45,21 +45,39 @@ export default function OrderCard({ order }: OrderCardProps) {
         </Stack>
         <Collapse in={expanded}>
           <Stack spacing={1} sx={{ mt: 2 }}>
-            {order.items.map((item, i) => (
-              <Stack key={i} direction="row" alignItems="center" spacing={1}>
-                {item.image_id && (
-                  <Box component="img" src={imgUrl(item.image_id)} alt={item.name}
-                    sx={{ width: 32, height: 32, objectFit: "contain" }} />
-                )}
-                <Typography variant="body2" flex={1} noWrap>{item.name}</Typography>
-                <Typography variant="body2" color="text.secondary">{item.quantity}x</Typography>
-                {item.price_cents != null && (
-                  <Typography variant="body2" fontWeight={600} sx={{ minWidth: 56, textAlign: "right" }}>
-                    {formatPrice(item.price_cents * item.quantity)}
-                  </Typography>
-                )}
-              </Stack>
-            ))}
+            {order.items.map((item, i) => {
+              const onOffer = item.promo_price_cents != null && item.price_cents != null;
+              return (
+                <Stack key={i} direction="row" alignItems="center" spacing={1}>
+                  {item.image_id && (
+                    <Box component="img" src={imgUrl(item.image_id)} alt={item.name}
+                      sx={{ width: 32, height: 32, objectFit: "contain" }} />
+                  )}
+                  <Box flex={1} minWidth={0}>
+                    <Typography variant="body2" noWrap>{item.name}</Typography>
+                    {item.promo_text && (
+                      <Chip label={item.promo_text} size="small" color="error" variant="outlined"
+                        sx={{ height: 18, fontSize: "0.65rem", "& .MuiChip-label": { px: 0.75 } }} />
+                    )}
+                  </Box>
+                  <Typography variant="body2" color="text.secondary">{item.quantity}x</Typography>
+                  {item.price_cents != null && (
+                    <Stack alignItems="flex-end" sx={{ minWidth: 64 }}>
+                      {onOffer && (
+                        <Typography variant="caption" color="text.secondary"
+                          sx={{ textDecoration: "line-through", lineHeight: 1.1 }}>
+                          {formatPrice(item.price_cents * item.quantity)}
+                        </Typography>
+                      )}
+                      <Typography variant="body2" fontWeight={600}
+                        color={onOffer ? "error.main" : "text.primary"}>
+                        {formatPrice((onOffer ? item.promo_price_cents! : item.price_cents) * item.quantity)}
+                      </Typography>
+                    </Stack>
+                  )}
+                </Stack>
+              );
+            })}
           </Stack>
         </Collapse>
       </CardContent>

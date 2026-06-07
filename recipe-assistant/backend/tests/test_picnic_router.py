@@ -108,6 +108,20 @@ async def test_get_pending_orders(client, override_picnic_client):
     assert "quantity_map" in data
 
 
+async def test_get_offers(client, override_picnic_client):
+    from app.services.picnic.offers import _reset_cache
+    _reset_cache()
+    resp = await client.get("/api/picnic/offers")
+    assert resp.status_code == 200
+    offers = resp.json()["offers"]
+    assert len(offers) == 2
+    gouda = next(o for o in offers if o["picnic_id"] == "s100")
+    assert gouda["price_cents"] == 143
+    assert gouda["original_price_cents"] == 179
+    assert gouda["promo_label"] == "20% Rabatt"
+    _reset_cache()
+
+
 async def test_debug_raw_offers_surfaces_decorators(client, override_picnic_client):
     fake = override_picnic_client
     fake.search_results["angebot"] = [
