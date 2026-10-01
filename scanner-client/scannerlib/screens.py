@@ -191,10 +191,15 @@ class Screens:
 
     def locations(self, draw, state, rects):
         """Scrollende Liste. Gezeichnet wird mit visual_offset, damit das
-        Ueberziehen am Rand sichtbar ist."""
+        Ueberziehen am Rand sichtbar ist.
+
+        Reihenfolge ist wichtig: erst die Zeilen, dann Kopf- und Unterzeile
+        darueber. PIL kennt keinen Klippbereich, deshalb ragt der Text einer
+        halb herausgescrollten Zeile sonst in die Unterzeile hinein. Beide
+        Leisten malen deckend und decken das zu.
+        """
         t = self.t
-        self.header(draw, state["mode"], rects)
-        y0 = self.subheader(draw, "Lagerort wählen", rects)
+        y0 = t.HEADER_H + t.SUBHEADER_H
 
         sv = state["scroll"]
         items = state["items"]
@@ -231,6 +236,9 @@ class Screens:
             by = y0 + int(max(0.0, min(1.0, off / max(1, sv.max_offset))) * (view_h - bh))
             draw.rounded_rectangle((t.width - t.s(4), by, t.width - t.s(2), by + bh),
                                    radius=t.s(1), fill=t.FG_DIM)
+
+        self.header(draw, state["mode"], rects)
+        self.subheader(draw, "Lagerort wählen", rects)
         self.status_dot(draw, state["api_ok"], in_subheader=True)
 
     # ---------- Verlauf ----------
