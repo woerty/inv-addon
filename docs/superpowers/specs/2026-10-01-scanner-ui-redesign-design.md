@@ -299,8 +299,9 @@ rechts der Rückgängig-Knopf über die **volle Kartenhöhe**. Bei 128 px Mindes
 flacher Knopf in einer Fußzeile wäre er rund 68 px hoch gewesen und damit unterhalb der
 Fingerkuppe.
 
-Der Knopf ist **172 px breit**. Bei 156 px hätte die Beschriftung auf 24 px heruntergehen
-müssen, also unter die Leiter; mit 172 px passen die 26 px.
+Der Knopf ist **196 px breit**. Am Geraet nachgemessen: „Rückgängig" misst in
+DejaVu Sans Bold bei 26 px genau 172 px. Die urspruenglich geplanten 172 px waren
+eine Schaetzung aus dem Entwurf und haetten keinen Innenrand gelassen.
 
 Lange Produktnamen werden mit Auslassungspunkten gekürzt, nicht umgebrochen — eine zweite
 Zeile würde die Kartenhöhe sprengen. Dasselbe gilt für die Namen im Verlauf.
