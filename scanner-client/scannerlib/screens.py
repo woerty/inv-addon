@@ -174,6 +174,26 @@ class Screens:
         res = state["result"]
         x0, x1 = t.PAD, t.width - t.PAD
         h = max(t.CARD_MIN_H, t.s(64))
+
+        fortschritt = state.get("progress")
+        if fortschritt:
+            erledigt, gesamt = fortschritt
+            draw.rounded_rectangle((x0, y, x1, y + h), radius=t.RADIUS,
+                                   fill=t.SURFACE, outline=t.LINE, width=1)
+            r = t.s(20)
+            cx, cy = x0 + t.s(14) + r, y + h // 2
+            draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=t.LINE, width=t.s(3))
+            if erledigt:
+                draw.pieslice((cx - r, cy - r, cx + r, cy + r), -90,
+                              -90 + int(360 * erledigt / gesamt),
+                              outline=t.ACCENT, width=t.s(3))
+            label = "%d von %d" % (erledigt, gesamt)
+            draw.text((cx + r + t.s(8), cy - t.font_md.size / 2 - t.s(1)),
+                      label, font=t.font_md, fill=t.FG)
+            draw.text((cx + r + t.s(8), cy + t.s(4)),
+                      "wird gebucht", font=t.font_sm, fill=t.FG_DIM)
+            return
+
         if res is None:
             draw.rounded_rectangle((x0, y, x1, y + h), radius=t.RADIUS,
                                    outline=t.LINE, width=1)
@@ -274,51 +294,75 @@ class Screens:
     # ---------- Verlauf ----------
 
     def history(self, draw, state, rects):
+        """Scrollt wie die Lagerortliste -- die Spezifikation verspricht 20
+        Eintraege, ohne Scrollen waeren vier davon erreichbar."""
         t = self.t
-        y0 = self.listheader(draw, "Letzte Scans", state["api_ok"], rects)
-
+        y0 = t.HEADER_H
         entries = state["entries"]
+        sv = state["scroll"]
+        off = sv.visual_offset if sv is not None else 0
+
         if not entries:
+            self.listheader(draw, "Letzte Scans", state["api_ok"], rects)
             _center(draw, "noch nichts gescannt", t.font_sm, t.FG_DIM,
                     y0 + t.s(30), t.width)
             rects["hrows"] = []
             return
 
-        bw, bh = t.s(42), t.s(42)   # 84x84, Fingermass
+        bw, bh = t.s(42), t.s(42)
         row_rects = []
         for i, e in enumerate(entries):
-            ry = y0 + i * t.ROW_H
-            if ry + t.ROW_H > t.height:
+            ry = y0 + i * t.ROW_H - off
+            if ry + t.ROW_H < y0 or ry > t.height:
                 row_rects.append(None)
                 continue
-            draw.rectangle((0, ry, t.width, ry + t.ROW_H),
+            vy = max(ry, y0)
+            vh = min(ry + t.ROW_H, t.height) - vy
+            if vh <= 0:
+                row_rects.append(None)
+                continue
+            draw.rectangle((0, vy, t.width, vy + vh),
                            fill=t.SURFACE if i % 2 == 0 else t.SURFACE_ALT)
-            draw.line((t.s(5), ry + t.ROW_H - 1, t.width - t.s(5), ry + t.ROW_H - 1),
-                      fill=t.LINE)
+            draw.line((t.s(5), vy + vh - 1, t.width - t.s(5), vy + vh - 1), fill=t.LINE)
+
             bx = t.width - t.PAD - bw
             by = ry + (t.ROW_H - bh) // 2
             draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=t.RADIUS_SM,
                                    fill=t.SURFACE_ALT, outline=t.LINE, width=1)
-            w = draw.textlength("↶", font=t.font_sm)
+            w = draw.textlength("\u21b6", font=t.font_sm)
             draw.text((bx + (bw - w) / 2, by + (bh - t.font_sm.size) / 2 - t.s(1)),
-                      "↶", font=t.font_sm, fill=t.FG)
+                      "\u21b6", font=t.font_sm, fill=t.FG)
 
+            ty = ry + (t.ROW_H - t.font_md.size) / 2 - t.s(1)
             ago = _ago(state["now"] - e.at)
             aw = draw.textlength(ago, font=t.font_sm)
             draw.text((bx - t.s(6) - aw, ry + (t.ROW_H - t.font_sm.size) / 2 - t.s(1)),
                       ago, font=t.font_sm, fill=t.FG_DIM)
 
-            menge = "×%d" % e.count + (" (%d)" % e.booked if e.partial else "")
+            # Bei Teilbuchung zaehlt die tatsaechlich gebuchte Menge, nicht die
+            # gewuenschte -- sonst steht im Verlauf eine Zahl, die nie gebucht wurde.
+            menge = ("\u00d7%d von %d" % (e.booked, e.count)) if e.partial \
+                else ("\u00d7%d" % e.count)
             mw = draw.textlength(menge, font=t.font_md)
             mx = bx - t.s(6) - aw - t.s(6) - mw
-            draw.text((mx, ry + (t.ROW_H - t.font_md.size) / 2 - t.s(1)), menge,
-                      font=t.font_md, fill=t.WARN if e.partial else t.ACCENT)
-
-            draw.text((t.s(8), ry + (t.ROW_H - t.font_md.size) / 2 - t.s(1)),
+            draw.text((mx, ty), menge, font=t.font_md,
+                      fill=t.WARN if e.partial else t.ACCENT)
+            draw.text((t.s(8), ty),
                       ellipsize(draw, e.name, t.font_md, mx - t.s(14)),
                       font=t.font_md, fill=t.FG)
             row_rects.append((bx, by, bx + bw, by + bh))
         rects["hrows"] = row_rects
+
+        total = len(entries) * t.ROW_H
+        view_h = t.height - y0
+        if sv is not None and total > view_h and state.get("scrolling"):
+            sbh = max(t.s(14), int(view_h * view_h / total))
+            sby = y0 + int(max(0.0, min(1.0, off / max(1, sv.max_offset)))
+                           * (view_h - sbh))
+            draw.rounded_rectangle((t.width - t.s(4), sby, t.width - t.s(2), sby + sbh),
+                                   radius=t.s(1), fill=t.FG_DIM)
+
+        self.listheader(draw, "Letzte Scans", state["api_ok"], rects)
 
 
     # ---------- Mengenauswahl ----------
@@ -346,13 +390,12 @@ class Screens:
             y = y0 + r * (ch + gap)
             draw.rounded_rectangle((x, y, x + cw, y + ch), radius=t.RADIUS_SM,
                                    fill=t.SURFACE_ALT, outline=t.LINE, width=2)
-            label = "×%d" % n
+            label = "\u00d7%d" % n
             w = draw.textlength(label, font=t.font_md)
             draw.text((x + (cw - w) / 2, y + (ch - t.font_md.size) / 2 - t.s(1)),
                       label, font=t.font_md, fill=t.FG)
             cells.append((x, y, x + cw, y + ch))
         rects["mcells"] = cells
-
 
 
 def _ago(seconds):

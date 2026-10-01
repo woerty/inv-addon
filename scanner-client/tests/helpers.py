@@ -1,6 +1,8 @@
 """Testdoppel: kein Netz, kein Display, kein evdev."""
 from PIL import Image
 
+import threading
+
 from scannerlib.app import App
 from scannerlib.scanlog import ScanLog
 from scannerlib.theme import Theme
@@ -70,16 +72,22 @@ def make_app(api, **kw):
     app.api_ok = True
     app.scanner_connected = True
     app.busy = False
+    app.booking = False
+    app.progress = None
     app.last_result = None
     app.result_deadline = None
     app.idle_reset_s = 600
     app.last_activity = 0.0
     app.screen = "scan"
-    app.scroll = None
+    app.scroll_loc = None
+    app.scroll_hist = None
+    app._swallow = False
+    app._rendered_items = []
     app._dirty = False
     app._rects = {}
     app._last_location_fetch = 0.0
     app._location_fetch_running = False
+    app._locations_lock = threading.Lock()
     for k, v in kw.items():
         setattr(app, k, v)
     return app

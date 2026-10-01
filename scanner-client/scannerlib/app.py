@@ -50,6 +50,8 @@ class App:
         self.api_ok = True
         self.scanner_connected = True
         self.busy = False
+        self.booking = False
+        self.progress = None    # (erledigt, gesamt) waehrend einer Buchung
         self.last_result = None      # dict fuer die Karte
         self.last_entry = None       # zugehoeriger ScanEntry, fuer Rueckgaengig
         self.result_deadline = None
@@ -57,7 +59,8 @@ class App:
         self.idle_reset_s = int(cfg.get("idle_reset_minutes", 10)) * 60
         self.last_activity = time.monotonic()
 
-        self.scroll = None
+        self.scroll_loc = None
+        self.scroll_hist = None
         self._swallow = False
         self._dirty = True
         self._rects = {}
@@ -119,8 +122,8 @@ class App:
         return [{"id": None, "name": "Ohne Ort"}] + list(self.locations)
 
     def _sync_scroll(self):
-        if self.scroll is not None:
-            self.scroll.set_content_h(len(self._items()) * self.theme.ROW_H)
+        if self.scroll_loc is not None:
+            self.scroll_loc.set_content_h(len(self._items()) * self.theme.ROW_H)
 
     def _apply_start_mode(self):
         mode = str(self.cfg.get("start_mode", "")).strip().lower()
@@ -153,6 +156,7 @@ class App:
         nicht die gewuenschte.
         """
         self.busy = True
+        self.progress = (0, count) if count > 1 else None
         booked, status, data, name = 0, None, None, barcode
         for _ in range(count):
             if self.mode == "out":
@@ -165,8 +169,11 @@ class App:
             booked += 1
             if isinstance(data, dict):
                 name = data.get("name", barcode)
+            if count > 1:
+                self.progress = (booked, count)
             self.invalidate()
         self.busy = False
+        self.progress = None
         self.multiplier = 1            # faellt immer zurueck, auch bei Abbruch
         self.api_ok = status is not None
         self.touch_activity()
@@ -306,10 +313,13 @@ class App:
             "status": self.state_text(), "multiplier": self.multiplier,
             "api_ok": self.api_ok, "result": self.last_result,
             "card_bg": self.card_bg,
-            "items": self._items(), "scroll": self.scroll,
-            "scrolling": self.scroll is not None and (
-                self.scroll.is_dragging or abs(self.scroll.velocity) > 0),
+            "items": self._items(), "scroll": self._scroll(),
+            "scrolling": self._scroll() is not None and (
+                self._scroll().is_dragging
+                or abs(self._scroll().velocity) > 0
+                or self._scroll().offset != round(self._scroll().offset)),
             "entries": self.log.entries, "now": time.monotonic(),
+            "progress": self.progress,
             "selected_id": self.location["id"] if self.location else None,
         }
 
@@ -346,19 +356,21 @@ class App:
         if self._swallow:
             if kind == "touch_up":
                 self._swallow = False
-                if self.scroll is not None:
-                    self.scroll.on_up(time.monotonic())   # Ziehzustand aufraeumen
+                sv = self._scroll()
+                if sv is not None:
+                    sv.on_up(time.monotonic())   # Ziehzustand aufraeumen
             return
         self.touch_activity()
 
-        if self.screen == LOCATIONS and self.scroll is not None:
+        sv = self._scroll()
+        if sv is not None:
             now = time.monotonic()
             if kind == "touch_move":
-                if self.scroll.on_move(py, now):
+                if sv.on_move(py, now):
                     self.invalidate()
                 return
-            self.scroll.on_up(now)
-            if self.scroll.was_drag:
+            sv.on_up(now)
+            if sv.was_drag:
                 self.invalidate()
                 return
 
@@ -375,7 +387,7 @@ class App:
             if self.screen == LOCATIONS:
                 self._open_locations()
         elif hit(r.get("hist"), px, py):
-            self.screen = HISTORY
+            self._open_history()
         elif hit(r.get("back"), px, py):
             self.screen = SCAN
         elif hit(r.get("loc"), px, py):
@@ -411,6 +423,24 @@ class App:
                     break
         self.invalidate()
 
+    def _scroll(self):
+        """Der Scrollstand des gerade sichtbaren Bildschirms."""
+        if self.screen == LOCATIONS:
+            return self.scroll_loc
+        if self.screen == HISTORY:
+            return self.scroll_hist
+        return None
+
+    def _open_history(self):
+        self.screen = HISTORY
+        y0 = self.theme.HEADER_H
+        n = max(1, len(self.log.entries))
+        if self.scroll_hist is None:
+            self.scroll_hist = ScrollView(view_h=self.theme.height - y0,
+                                          content_h=n * self.theme.ROW_H)
+        else:
+            self.scroll_hist.set_content_h(n * self.theme.ROW_H)
+
     def _open_locations(self):
         """Liste oeffnen und dabei den Scrollstand behalten.
 
@@ -419,9 +449,9 @@ class App:
         """
         self.screen = LOCATIONS
         y0 = self.theme.HEADER_H
-        if self.scroll is None:
-            self.scroll = ScrollView(view_h=self.theme.height - y0,
-                                     content_h=len(self._items()) * self.theme.ROW_H)
+        if self.scroll_loc is None:
+            self.scroll_loc = ScrollView(view_h=self.theme.height - y0,
+                                         content_h=len(self._items()) * self.theme.ROW_H)
         else:
             self._sync_scroll()
         self._refresh_locations_async()
@@ -432,18 +462,40 @@ class App:
         # bleibt dauerhaft True -- die Liste federt dann nie zurueck.
         if self._swallow:
             return
-        if self.screen == LOCATIONS and self.scroll is not None:
-            self.scroll.on_down(py, time.monotonic())
+        sv = self._scroll()
+        if sv is not None:
+            sv.on_down(py, time.monotonic())
 
     def handle_barcode(self, barcode):
+        """Nimmt den Scan an und gibt die Buchung an einen Thread ab.
+
+        Frueher lief book() hier im Schleifen-Thread. Bei x12 auf eine lahme
+        Verbindung stand das Display minutenlang still, keine Beruehrung kam
+        durch, und die gestauten Ereignisse wurden danach gegen ein veraltetes
+        Layout abgespielt.
+        """
         self.display.wake()
         self.touch_activity()
+        if self.booking:
+            return                       # eine Buchung reicht
         if self.screen != SCAN:
             self.screen = SCAN
+        anzahl = max(1, self.multiplier)
+        self.booking = True
         self.busy = True
+        self.progress = (0, anzahl) if anzahl > 1 else None
         self.invalidate()
-        self.render()
-        self.book(barcode, max(1, self.multiplier))
+
+        def arbeiten():
+            try:
+                self.book(barcode, anzahl)
+            finally:
+                self.booking = False
+                self.busy = False
+                self.progress = None
+                self.invalidate()
+
+        threading.Thread(target=arbeiten, daemon=True).start()
 
     def handle_scanner_state(self, connected):
         if connected != self.scanner_connected:
@@ -472,14 +524,15 @@ class App:
 
     def _advance(self, dt, now):
         """Zeitgeber und Animationen. True, solange etwas in Bewegung ist."""
-        moving = False
+        moving = bool(self.booking)
         self.display.tick_backlight(now)
         if self.result_deadline is not None and now >= self.result_deadline:
             self.result_deadline = None
             self.card_bg = None
             self.invalidate()
-        if self.screen == LOCATIONS and self.scroll is not None:
-            if self.scroll.advance(dt):
+        sv = self._scroll()
+        if sv is not None:
+            if sv.advance(dt):
                 moving = True
                 self.invalidate()
         self._check_idle(now)
