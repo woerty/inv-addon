@@ -15,6 +15,9 @@ DEFAULT_CONFIG = {
     "screen_width": 640,
     "screen_height": 480,
     "fb_rotate": 90,
+    # Nach so vielen Minuten ohne Beruehrung zurueck in den Auslagern-Modus.
+    # 0 schaltet den Ruecksprung ab.
+    "idle_reset_minutes": 10,
     # Wie das Touchglas gegenueber dem Panel verbaut ist, steht in keinem
     # Datenblatt -- gemessen mit orient.py, siehe scanner.conf.
     "touch_swap_xy": 0,
@@ -40,7 +43,7 @@ def load_config():
                     k, v = line.split("=", 1)
                     cfg[k.strip()] = v.strip()
     for k in ("screen_width", "screen_height", "backlight_timeout",
-              "fb_rotate", "touch_swap_xy", "touch_flip_x",
+              "fb_rotate", "idle_reset_minutes", "touch_swap_xy", "touch_flip_x",
               "touch_flip_y"):
         cfg[k] = int(cfg[k])
     return cfg

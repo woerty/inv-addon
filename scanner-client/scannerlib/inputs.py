@@ -23,6 +23,7 @@ def barcode_reader(device_path, q):
         try:
             dev = evdev.InputDevice(device_path)
             dev.grab()
+            q.put(("scanner", True))
             barcode = ""
             for event in dev.read_loop():
                 if event.type == evdev.ecodes.EV_KEY and event.value == 1:
@@ -36,6 +37,9 @@ def barcode_reader(device_path, q):
                     else:
                         barcode += char
         except (OSError, IOError) as e:
+            # Ohne diese Meldung stand am 27.09. zwanzig Stunden lang
+            # "Bereit" auf dem Schirm, waehrend gar kein Scanner dranhing.
+            q.put(("scanner", False))
             print(f"Scanner error: {e}, retrying in 2s...")
             time.sleep(2)
 
@@ -106,6 +110,9 @@ def touch_reader(device_path, q, cfg):
                     if event.code == evdev.ecodes.BTN_TOUCH:
                         if event.value == 1:
                             touching = True
+                            if x is not None and y is not None:
+                                px, py = to_screen(x, y)
+                                q.put(("touch_down", px, py))
                         else:
                             touching = False
                             if x is not None and y is not None:
