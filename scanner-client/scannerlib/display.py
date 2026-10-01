@@ -1,5 +1,5 @@
 """Framebuffer, Hintergrundbeleuchtung, Zeichenhelfer."""
-import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -59,7 +59,7 @@ class Display:
         self.s = width / float(self.DESIGN_WIDTH)
         self.backlight_path = backlight_path
         self.backlight_timeout = backlight_timeout
-        self._bl_timer = None
+        self._bl_deadline = None
         self._fb = None
         self._is_off = False
 
@@ -108,22 +108,30 @@ class Display:
         except OSError:
             pass
 
-    def _backlight_off_and_flag(self):
-        self._is_off = True
-        self.backlight_off()
 
     def wake(self):
-        """Turn backlight on, restart timer. Returns True if was asleep."""
+        """Beleuchtung an, Ablaufzeit neu setzen. True, wenn sie aus war.
+
+        Kein threading.Timer mehr -- die Bildschleife prueft den Zeitpunkt.
+        Das spart einen Thread, der bisher nebenlaeufig gezeichnet hat.
+        """
         was_off = self._is_off
         self._is_off = False
         self.backlight_on()
-        if self._bl_timer is not None:
-            self._bl_timer.cancel()
-        self._bl_timer = threading.Timer(self.backlight_timeout,
-                                         self._backlight_off_and_flag)
-        self._bl_timer.daemon = True
-        self._bl_timer.start()
+        self._bl_deadline = time.monotonic() + self.backlight_timeout
         return was_off
+
+    def tick_backlight(self, now):
+        """Von der Bildschleife aufgerufen. True, wenn gerade abgeschaltet wurde."""
+        if self._is_off or self._bl_deadline is None:
+            return False
+        if now < self._bl_deadline:
+            return False
+        self._is_off = True
+        self.backlight_off()
+        self._bl_deadline = None
+        return True
+
 
     def new_frame(self):
         return Image.new('RGB', (self.width, self.height), self.BG)

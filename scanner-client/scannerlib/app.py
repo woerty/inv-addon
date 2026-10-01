@@ -16,6 +16,12 @@ from .inputs import barcode_reader, touch_reader
 # Beim Booten ist der HA-Host oft noch nicht erreichbar.
 LOCATION_RETRY_INTERVAL = 30.0
 
+# Bildrate waehrend Animationen. Gemessen: ein Vollbild kostet 19,4 ms,
+# das Budget sind 33,3 ms.
+FPS = 30
+FRAME_SECONDS = 1.0 / FPS
+RESULT_SECONDS = 4.0
+
 # Mindeststrecke fuer einen Wisch, in echten Bildschirmpixeln. Der
 # kapazitive Touch zittert kaum, deshalb reicht ein kleiner Wert --
 # er muss nur unter der Zeilenhoehe der Lagerortliste bleiben.
@@ -48,7 +54,7 @@ class App:
         self.touch_start_y_initial = None
         self.is_dragging = False
         self._swallow_gesture = False
-        self.result_timer = None
+        self.result_deadline = None
         self.last_result = None
 
         self._render_lock = threading.Lock()
@@ -389,8 +395,7 @@ class App:
                     self.render()
 
             elif self.screen == RESULT:
-                if self.result_timer:
-                    self.result_timer.cancel()
+                self.result_deadline = None
                 self.screen = SCANNING
                 self.render()
 
@@ -400,8 +405,7 @@ class App:
         if self.screen not in (SCANNING, RESULT):
             return
 
-        if self.result_timer:
-            self.result_timer.cancel()
+        self.result_deadline = None
 
         d = self.display
         img = d.new_frame()
@@ -424,19 +428,50 @@ class App:
         self.screen = RESULT
         self.render()
 
-        self.result_timer = threading.Timer(4.0, self._result_timeout)
-        self.result_timer.daemon = True
-        self.result_timer.start()
+        self.result_deadline = time.monotonic() + RESULT_SECONDS
 
-    def _result_timeout(self):
-        self.screen = SCANNING
-        self.render()
+
+    # --- Bildschleife ---
+
+    def invalidate(self):
+        """Naechstes Bild neu zeichnen. Ersetzt die render()-Aufrufe, die
+        bisher als Nebenwirkung ueberall verstreut waren."""
+        self._dirty = True
+
+    def _drain_input(self):
+        """Alles Wartende abholen, ohne zu blockieren."""
+        got = False
+        while True:
+            try:
+                event = self.event_queue.get_nowait()
+            except queue.Empty:
+                return got
+            got = True
+            self._handle(event)
+
+    def _handle(self, event):
+        if event[0] == "barcode":
+            self.handle_barcode(event[1])
+        elif event[0] in ("touch_up", "touch_move"):
+            self.handle_touch(event[1], event[2], event[0])
+
+    def _advance(self, dt, now):
+        """Zeitgeber und Animationen. True, solange etwas in Bewegung ist."""
+        moving = False
+        if self.display.tick_backlight(now):
+            pass                      # nur ausschalten, kein Neuzeichnen noetig
+        if self.result_deadline is not None and now >= self.result_deadline:
+            self.result_deadline = None
+            self.screen = SCANNING
+            self.invalidate()
+        return moving
 
     def run(self):
         self._btn_out = (0, 0, 0, 0)
         self._btn_in = (0, 0, 0, 0)
         self._btn_back = (0, 0, 0, 0)
         self._location_rects = []
+        self._dirty = True
 
         t_barcode = threading.Thread(
             target=barcode_reader,
@@ -452,7 +487,6 @@ class App:
         t_touch.start()
 
         self.display.wake()
-        self.render()
 
         print("Scanner client gestartet")
         print(f"API: {self.cfg['api_url']}")
@@ -460,16 +494,35 @@ class App:
         print(f"Touch: {self.cfg['touch_device']}")
         print(f"Locations: {len(self.locations)}")
 
+        last = time.monotonic()
+        frames, fps_since = 0, last
         while True:
-            try:
-                event = self.event_queue.get(timeout=1.0)
-            except queue.Empty:
-                self._maybe_retry_locations()
-                continue
+            now = time.monotonic()
+            dt = now - last
+            last = now
 
-            if event[0] == "barcode":
-                self.handle_barcode(event[1])
-            elif event[0] in ("touch_up", "touch_move"):
-                self.handle_touch(event[1], event[2], event[0])
+            self._drain_input()
+            animating = self._advance(dt, now)
+            self._maybe_retry_locations()
 
+            if self._dirty or animating:
+                self.render()
+                self._dirty = False
+                frames += 1
 
+            if animating and now - fps_since >= 1.0:
+                print("fps: %.1f" % (frames / (now - fps_since)))
+                frames, fps_since = 0, now
+
+            rest = FRAME_SECONDS - (time.monotonic() - now)
+            if animating:
+                if rest > 0:
+                    time.sleep(rest)
+            else:
+                # Im Ruhezustand nicht heisslaufen: auf das naechste Ereignis
+                # warten statt 30-mal pro Sekunde nichts zu tun.
+                try:
+                    event = self.event_queue.get(timeout=0.25)
+                except queue.Empty:
+                    continue
+                self._handle(event)
