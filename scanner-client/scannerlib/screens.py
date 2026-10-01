@@ -72,11 +72,20 @@ class Screens:
                   "☰", font=t.font_icon, fill=t.FG)
         rects["hist"] = (hx0, 0, t.width - pad, h)
 
-    def status_dot(self, draw, ok):
-        """Unten links, frei im Bild -- nimmt der Modusleiste keine Breite weg."""
+    def status_dot(self, draw, ok, in_subheader=False):
+        """Verbindungsanzeige.
+
+        Auf dem Scan-Bildschirm unten links im freien Raum. Auf Listen-
+        Bildschirmen waere dort eine Zeile -- dort sitzt er rechts in der
+        Unterzeile, wo ohnehin Platz ist.
+        """
         t = self.t
         r = t.s(7)
-        x, y = t.PAD + r, t.height - t.PAD - r
+        if in_subheader:
+            x = t.width - t.PAD - r
+            y = t.HEADER_H + t.SUBHEADER_H // 2
+        else:
+            x, y = t.PAD + r, t.height - t.PAD - r
         draw.ellipse((x - r, y - r, x + r, y + r), fill=t.IN if ok else t.DANGER)
 
     def subheader(self, draw, title, rects):
@@ -177,3 +186,110 @@ class Screens:
             draw.text((ux0 + (undo_w - w) / 2, y + h / 2 - t.font_sm.size / 2),
                       "Rückgängig", font=t.font_sm, fill=t.FG)
             rects["undo"] = (ux0, y + pad, x1 - pad, y + h - pad)
+
+    # ---------- Lagerort ----------
+
+    def locations(self, draw, state, rects):
+        """Scrollende Liste. Gezeichnet wird mit visual_offset, damit das
+        Ueberziehen am Rand sichtbar ist."""
+        t = self.t
+        self.header(draw, state["mode"], rects)
+        y0 = self.subheader(draw, "Lagerort wählen", rects)
+
+        sv = state["scroll"]
+        items = state["items"]
+        view_h = t.height - y0
+        off = sv.visual_offset
+        row_rects = []
+
+        for i, item in enumerate(items):
+            ry = y0 + i * t.ROW_H - off
+            if ry + t.ROW_H < y0 or ry > t.height:
+                row_rects.append(None)
+                continue
+            vy = max(ry, y0)
+            vh = min(ry + t.ROW_H, t.height) - vy
+            if vh <= 0:
+                row_rects.append(None)
+                continue
+            draw.rectangle((0, vy, t.width, vy + vh),
+                           fill=t.SURFACE if i % 2 == 0 else t.SURFACE_ALT)
+            draw.line((t.s(5), vy + vh - 1, t.width - t.s(5), vy + vh - 1), fill=t.LINE)
+            ty = ry + (t.ROW_H - t.font_md.size) / 2 - t.s(1)
+            if y0 - t.ROW_H < ty < t.height:
+                draw.text((t.s(10), ty),
+                          ellipsize(draw, item["name"], t.font_md, t.width - t.s(24)),
+                          font=t.font_md,
+                          fill=t.ACCENT if item["id"] is None else t.FG)
+            row_rects.append((0, vy, t.width, vy + vh))
+        rects["rows"] = row_rects
+
+        # Scrollbalken nur waehrend der Bewegung -- im Ruhezustand stoert er.
+        total = len(items) * t.ROW_H
+        if total > view_h and state["scrolling"]:
+            bh = max(t.s(14), int(view_h * view_h / total))
+            by = y0 + int(max(0.0, min(1.0, off / max(1, sv.max_offset))) * (view_h - bh))
+            draw.rounded_rectangle((t.width - t.s(4), by, t.width - t.s(2), by + bh),
+                                   radius=t.s(1), fill=t.FG_DIM)
+        self.status_dot(draw, state["api_ok"], in_subheader=True)
+
+    # ---------- Verlauf ----------
+
+    def history(self, draw, state, rects):
+        t = self.t
+        self.header(draw, state["mode"], rects)
+        y0 = self.subheader(draw, "Letzte Scans", rects)
+
+        entries = state["entries"]
+        if not entries:
+            _center(draw, "noch nichts gescannt", t.font_sm, t.FG_DIM,
+                    y0 + t.s(30), t.width)
+            self.status_dot(draw, state["api_ok"], in_subheader=True)
+            rects["hrows"] = []
+            return
+
+        bw, bh = t.s(36), t.s(32)
+        row_rects = []
+        for i, e in enumerate(entries):
+            ry = y0 + i * t.ROW_H
+            if ry + t.ROW_H > t.height:
+                row_rects.append(None)
+                continue
+            draw.rectangle((0, ry, t.width, ry + t.ROW_H),
+                           fill=t.SURFACE if i % 2 == 0 else t.SURFACE_ALT)
+            draw.line((t.s(5), ry + t.ROW_H - 1, t.width - t.s(5), ry + t.ROW_H - 1),
+                      fill=t.LINE)
+            bx = t.width - t.PAD - bw
+            by = ry + (t.ROW_H - bh) // 2
+            draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=t.RADIUS_SM,
+                                   fill=t.SURFACE_ALT, outline=t.LINE, width=1)
+            w = draw.textlength("↶", font=t.font_sm)
+            draw.text((bx + (bw - w) / 2, by + (bh - t.font_sm.size) / 2 - t.s(1)),
+                      "↶", font=t.font_sm, fill=t.FG)
+
+            ago = _ago(state["now"] - e.at)
+            aw = draw.textlength(ago, font=t.font_sm)
+            draw.text((bx - t.s(6) - aw, ry + (t.ROW_H - t.font_sm.size) / 2 - t.s(1)),
+                      ago, font=t.font_sm, fill=t.FG_DIM)
+
+            menge = "×%d" % e.count + (" (%d)" % e.booked if e.partial else "")
+            mw = draw.textlength(menge, font=t.font_md)
+            mx = bx - t.s(6) - aw - t.s(6) - mw
+            draw.text((mx, ry + (t.ROW_H - t.font_md.size) / 2 - t.s(1)), menge,
+                      font=t.font_md, fill=t.WARN if e.partial else t.ACCENT)
+
+            draw.text((t.s(8), ry + (t.ROW_H - t.font_md.size) / 2 - t.s(1)),
+                      ellipsize(draw, e.name, t.font_md, mx - t.s(14)),
+                      font=t.font_md, fill=t.FG)
+            row_rects.append((bx, by, bx + bw, by + bh))
+        rects["hrows"] = row_rects
+        self.status_dot(draw, state["api_ok"], in_subheader=True)
+
+
+def _ago(seconds):
+    if seconds < 60:
+        return "gerade"
+    minutes = int(seconds // 60)
+    if minutes < 60:
+        return "vor %d min" % minutes
+    return "vor %d h" % (minutes // 60)
