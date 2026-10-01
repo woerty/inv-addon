@@ -42,9 +42,16 @@ class Theme:
     WARN = (0xFF, 0xC2, 0x4D)
     DANGER = (0xFF, 0x6B, 0x6B)
     ON_ACCENT = (0x10, 0x13, 0x1A)  # Text auf gefuellten Flaechen
+    # Abgeleitete Flaechen. Stehen hier, damit kein Zahlenwert im Zeichencode
+    # steht -- der Plan schreibt Farben nur aus der Palette vor.
+    FLASH_IN = (0x1F, 0x2E, 0x26)   # Aufleuchten nach erfolgreichem Einlagern
+    FLASH_OUT = (0x2E, 0x26, 0x16)  # dasselbe fuer Auslagern, in Modusfarbe
+    SELECTED = (0x13, 0x22, 0x31)   # gewaehlte Listenzeile, armierter xN-Knopf
+    SCRIM = (0x05, 0x07, 0x0A)      # Abdunkeln hinter der Mengenauswahl
 
-    def __init__(self, width):
+    def __init__(self, width, height=None):
         self.width = width
+        self.height = height if height is not None else int(width * 0.75)
         self.scale = width / float(DESIGN_WIDTH)
 
         # Schriftleiter. Die kleinste Stufe liegt unter den 30 px, die ab

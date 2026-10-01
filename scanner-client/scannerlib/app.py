@@ -16,8 +16,8 @@ from .theme import Theme
 # Bildrate waehrend Animationen. Gemessen auf dem Pi 3A+: ein Vollbild kostet
 # 19,4 ms, das Budget sind 33,3 ms.
 FPS = 30
+FLASH_SECONDS = 0.2
 FRAME_SECONDS = 1.0 / FPS
-RESULT_SECONDS = 4.0
 LOCATION_RETRY_INTERVAL = 30.0
 
 SCAN, LOCATIONS, HISTORY, MULT = "scan", "locations", "history", "mult"
@@ -35,8 +35,7 @@ class App:
             cfg["backlight"], cfg["backlight_timeout"],
             rotate=cfg.get("fb_rotate", 0),
         )
-        self.theme = Theme(cfg["screen_width"])
-        self.theme.height = cfg["screen_height"]
+        self.theme = Theme(cfg["screen_width"], cfg["screen_height"])
         self.screens = Screens(self.theme)
         self.api = API(cfg["api_url"], cfg["scanner_token"])
         self.event_queue = queue.Queue()
@@ -46,6 +45,7 @@ class App:
         self.mode = "out"
         self.location = None
         self.locations = []
+        self.locations_known = False
         self.multiplier = 1
         self.api_ok = True
         self.scanner_connected = True
@@ -54,8 +54,7 @@ class App:
         self.progress = None    # (erledigt, gesamt) waehrend einer Buchung
         self.last_result = None      # dict fuer die Karte
         self.last_entry = None       # zugehoeriger ScanEntry, fuer Rueckgaengig
-        self.result_deadline = None
-        self.card_bg = None
+        self.flash_until = 0.0
         self.idle_reset_s = int(cfg.get("idle_reset_minutes", 10)) * 60
         self.last_activity = time.monotonic()
 
@@ -74,15 +73,20 @@ class App:
     # ---------- Lagerorte ----------
 
     def _refresh_locations(self):
+        """Lagerorte holen.
+
+        Eine leere Liste ist eine gueltige Antwort, kein Ausfall -- sonst
+        steht dauerhaft "Keine Verbindung" und es wird alle 30 Sekunden
+        erfolglos nachgefragt. Nur None heisst, dass der Abruf scheiterte.
+        """
         data = self.api.get_locations()
-        if data and isinstance(data, list):
-            self.locations = data
-            self.api_ok = True
-        elif data and isinstance(data, dict) and "locations" in data:
-            self.locations = data["locations"]
-            self.api_ok = True
-        else:
+        if data is None:
             self.api_ok = False
+            print("Locations: Abruf fehlgeschlagen (%d bekannt)" % len(self.locations))
+            return
+        self.locations = list(data)
+        self.api_ok = True
+        self.locations_known = True
         print("Locations loaded: %d" % len(self.locations))
 
     def _refresh_locations_async(self):
@@ -112,7 +116,9 @@ class App:
         Beim Booten ist der HA-Host oft noch nicht erreichbar; ohne das hier
         bliebe die Liste bis zum naechsten Dienst-Neustart leer.
         """
-        if self.locations:
+        # Eine bestaetigt leere Liste ist eine Antwort, kein Grund zum
+        # Nachfragen. Nur ein nie geglueckter Abruf wird wiederholt.
+        if self.locations or self.locations_known:
             return
         if time.monotonic() - self._last_location_fetch < LOCATION_RETRY_INTERVAL:
             return
@@ -129,6 +135,10 @@ class App:
         mode = str(self.cfg.get("start_mode", "")).strip().lower()
         if mode in ("out", "in"):
             self.mode = mode
+            # Einlagern ohne gewaehlten Ort wuerde still auf "Ohne Ort"
+            # buchen -- die Navigationstabelle fuehrt hier in die Ortswahl.
+            if mode == "in" and self.location is None:
+                self._open_locations()
             print("Startmodus: %s" % mode)
         elif mode:
             print("start_mode: '%s' unbekannt (erwartet 'out', 'in' oder leer)" % mode)
@@ -181,15 +191,13 @@ class App:
         if booked == 0:
             self.last_entry = None
             self.last_result = self._failure_card(barcode, status, data)
-            self.result_deadline = None
             self.invalidate()
             return None
 
         entry = self.log.add(barcode, name, self.mode, count=count, booked=booked)
         self.last_entry = entry
         self.last_result = self._success_card(entry, data)
-        self.card_bg = (0x1F, 0x2E, 0x26)
-        self.result_deadline = time.monotonic() + 0.22   # kurzes Aufleuchten
+        self.flash_until = time.monotonic() + FLASH_SECONDS
         self.invalidate()
         return entry
 
@@ -307,12 +315,26 @@ class App:
     def invalidate(self):
         self._dirty = True
 
+    def _flash_colour(self):
+        """Blendet die Aufleuchtfarbe ueber FLASH_SECONDS zur Kartenfarbe
+        zurueck. Vorher war es eine konstante Flaeche mit hartem Sprung am
+        Ende -- und weil die Schleife danach bis zu 0,25 s auf der
+        Warteschlange stand, dauerte es real fast eine halbe Sekunde.
+        """
+        rest = self.flash_until - time.monotonic()
+        if rest <= 0:
+            return None
+        anteil = max(0.0, min(1.0, rest / FLASH_SECONDS))
+        von = self.theme.FLASH_IN if self.mode == "in" else self.theme.FLASH_OUT
+        nach = self.theme.SURFACE
+        return tuple(int(n + (v - n) * anteil) for v, n in zip(von, nach))
+
     def _state(self):
         return {
             "mode": self.mode, "location": self.location,
             "status": self.state_text(), "multiplier": self.multiplier,
             "api_ok": self.api_ok, "result": self.last_result,
-            "card_bg": self.card_bg,
+            "card_bg": self._flash_colour(),
             "items": self._items(), "scroll": self._scroll(),
             "scrolling": self._scroll() is not None and (
                 self._scroll().is_dragging
@@ -504,13 +526,27 @@ class App:
 
     # ---------- Bildschleife ----------
 
+    def _safe_handle(self, event):
+        """Ein unerwarteter Fehler darf das Geraet nicht abschalten.
+
+        Frueher beendete jede Ausnahme in _handle oder render den Prozess;
+        systemd startete neu, und Modus, Lagerort und Verlauf waren weg.
+        """
+        try:
+            self._handle(event)
+        except Exception as e:                      # noqa: BLE001
+            print("Fehler bei %r: %s" % (event[0], e))
+            self.last_result = {"name": "Fehler", "meta": str(e)[:60],
+                                "kind": "err", "undoable": False}
+            self.invalidate()
+
     def _drain_input(self):
         while True:
             try:
                 event = self.event_queue.get_nowait()
             except queue.Empty:
                 return
-            self._handle(event)
+            self._safe_handle(event)
 
     def _handle(self, event):
         if event[0] == "barcode":
@@ -526,9 +562,11 @@ class App:
         """Zeitgeber und Animationen. True, solange etwas in Bewegung ist."""
         moving = bool(self.booking)
         self.display.tick_backlight(now)
-        if self.result_deadline is not None and now >= self.result_deadline:
-            self.result_deadline = None
-            self.card_bg = None
+        if self.flash_until and now < self.flash_until:
+            moving = True
+            self.invalidate()
+        elif self.flash_until:
+            self.flash_until = 0.0
             self.invalidate()
         sv = self._scroll()
         if sv is not None:
@@ -563,7 +601,10 @@ class App:
             self._maybe_retry_locations()
 
             if self._dirty:
-                self.render()
+                try:
+                    self.render()
+                except Exception as e:              # noqa: BLE001
+                    print("Fehler beim Zeichnen: %s" % e)
                 self._dirty = False
                 frames += 1
 
@@ -579,7 +620,7 @@ class App:
                 # Im Ruhezustand auf Ereignisse warten statt 30-mal pro
                 # Sekunde nichts zu tun.
                 try:
-                    self._handle(self.event_queue.get(timeout=0.25))
+                    self._safe_handle(self.event_queue.get(timeout=0.25))
                 except queue.Empty:
                     pass
                 fps_since = time.monotonic()

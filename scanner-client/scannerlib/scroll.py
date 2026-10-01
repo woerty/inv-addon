@@ -9,7 +9,8 @@ import math
 
 class ScrollView:
     def __init__(self, view_h, content_h, friction=3.0, spring=12.0,
-                 damp=None, drag_threshold=25, min_velocity=20.0):
+                 damp=None, drag_threshold=25, min_velocity=20.0,
+                 bounce_damping=0.5):
         self.view_h = view_h
         self.content_h = content_h
         self.friction = friction        # 1/s, Abklingen des Schwungs
@@ -17,6 +18,7 @@ class ScrollView:
         self.damp = damp if damp is not None else view_h
         self.drag_threshold = drag_threshold
         self.min_velocity = min_velocity
+        self.bounce_damping = bounce_damping   # Rest beim Aufprall auf den Rand
 
         self.offset = 0.0
         self.velocity = 0.0
@@ -79,11 +81,15 @@ class ScrollView:
             self._y0 -= crossing
             self._off0 = self.offset
             dy -= crossing
-        self.offset = self._off0 + dy
+        neu = self._off0 + dy
+        geaendert = neu != self.offset
+        self.offset = neu
         self._samples.append((y, now))
         while len(self._samples) > 2 and now - self._samples[0][1] > 0.1:
             self._samples.pop(0)
-        return True
+        # Ein ruhender Finger erzeugt alle 50 ms ein Ereignis. Ohne diese
+        # Pruefung kostete das jedes Mal ein volles Neuzeichnen.
+        return geaendert
 
     def on_up(self, now=0.0):
         if not self.is_dragging:
@@ -112,7 +118,7 @@ class ScrollView:
             moving = True
             if self.offset < 0 or self.offset > m:
                 self.offset = max(-self.damp, min(m + self.damp, self.offset))
-                self.velocity *= 0.5
+                self.velocity *= self.bounce_damping
         else:
             self.velocity = 0.0
 

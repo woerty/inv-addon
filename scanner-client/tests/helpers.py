@@ -75,7 +75,7 @@ def make_app(api, **kw):
     app.booking = False
     app.progress = None
     app.last_result = None
-    app.result_deadline = None
+    app.flash_until = 0.0
     app.idle_reset_s = 600
     app.last_activity = 0.0
     app.screen = "scan"

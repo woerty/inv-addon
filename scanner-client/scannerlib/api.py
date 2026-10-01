@@ -17,22 +17,31 @@ class API:
         return h
 
     def _retry_request(self, method, url, **kwargs):
-        """Request with retry for network errors and 5xx."""
+        """Request mit Wiederholung -- nur bei Netzfehlern und 5xx.
+
+        Ein unlesbarer Rumpf wird NICHT wiederholt: scan-in ist nicht
+        idempotent, und eine Wiederholung nach einer bereits verarbeiteten
+        Anfrage bucht ein zweites Mal. Bei x12 waeren das bis zu 36 Anfragen.
+        """
         for attempt in range(3):
             try:
                 r = method(url, headers=self._headers(), timeout=5, **kwargs)
-                if r.status_code < 500:
-                    return r.status_code, r.json()
-                if attempt < 2:
-                    time.sleep(0.5)
-                    continue
-                return r.status_code, r.json()
-            except (requests.RequestException, ValueError) as e:
+            except requests.RequestException as e:
                 if attempt < 2:
                     time.sleep(0.5)
                     continue
                 return None, str(e)
+            if r.status_code >= 500 and attempt < 2:
+                time.sleep(0.5)
+                continue
+            try:
+                return r.status_code, r.json()
+            except ValueError:
+                # Der Server hat die Anfrage verarbeitet, nur die Antwort ist
+                # unlesbar. Nicht wiederholen.
+                return r.status_code, None
         return None, "max retries exceeded"
+
 
     def get_locations(self):
         """Returns list of {id, name} or None on error."""

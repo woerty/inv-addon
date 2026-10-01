@@ -57,6 +57,11 @@ class TestNebenlaeufigesBuchen(unittest.TestCase):
         self.assertTrue(app._advance(0.03, time.monotonic()),
                         "_advance meldet keine Bewegung, also wird nicht gezeichnet")
         self._warte(app)
+        # Nach der Buchung laeuft noch die 200-ms-Ueberblendung der Karte --
+        # erst danach darf die Schleife wieder zur Ruhe kommen.
+        ende = time.time() + 2.0
+        while app._advance(0.03, time.monotonic()) and time.time() < ende:
+            time.sleep(0.02)
         self.assertFalse(app._advance(0.03, time.monotonic()))
 
     def test_zweiter_scan_waehrend_einer_buchung_wird_ignoriert(self):

@@ -3,7 +3,7 @@
 Alle Masse stammen aus der Spezifikation. Die Methoden zeichnen und liefern
 Trefferflaechen zurueck; was ein Treffer bedeutet, entscheidet App.
 """
-from PIL import ImageDraw
+_ELLIPSIS_CACHE = {}
 
 
 def ellipsize(draw, text, font, max_px):
@@ -13,7 +13,13 @@ def ellipsize(draw, text, font, max_px):
     Suche statt zeichenweisem Abschneiden, weil textlength() der teuerste
     Teil ist und das Zeichnen im 33-ms-Budget liegen muss.
     """
+    schluessel = (text, getattr(font, "size", 0), int(max_px))
+    treffer = _ELLIPSIS_CACHE.get(schluessel)
+    if treffer is not None:
+        return treffer
     if draw.textlength(text, font=font) <= max_px:
+        if len(_ELLIPSIS_CACHE) < 512:
+            _ELLIPSIS_CACHE[schluessel] = text
         return text
     lo, hi = 0, len(text)
     while lo < hi:
@@ -22,7 +28,12 @@ def ellipsize(draw, text, font, max_px):
             lo = mid
         else:
             hi = mid - 1
-    return text[:lo] + "…"
+    ergebnis = text[:lo] + "…"
+    # Produktnamen wiederholen sich, Breiten auch. Die Binaersuche pro Bild
+    # pro Zeile war ein messbarer Teil der 28 ms Bildzeit.
+    if len(_ELLIPSIS_CACHE) < 512:
+        _ELLIPSIS_CACHE[schluessel] = ergebnis
+    return ergebnis
 
 
 def _center(draw, text, font, fill, y, width):
@@ -80,7 +91,7 @@ class Screens:
         Unterzeile, wo ohnehin Platz ist.
         """
         t = self.t
-        r = t.s(7)
+        r = t.s(3)    # 14 px Durchmesser, nicht Radius
         if in_subheader:
             x = t.width - t.PAD - r
             y = t.HEADER_H + t.SUBHEADER_H // 2
@@ -109,9 +120,9 @@ class Screens:
         # Trefferflaeche groesser als der gezeichnete Knopf: bis an den Rand
         # und ueber die volle Hoehe der Leiste.
         rects["back"] = (0, 0, bx + bw + t.s(12), h)
-        _center(draw, title, t.font_sm, t.FG_DIM, (h - t.font_sm.size) / 2 - t.s(1),
+        _center(draw, title, t.font_md, t.FG_DIM, (h - t.font_md.size) / 2 - t.s(1),
                 t.width)
-        r = t.s(7)
+        r = t.s(3)    # 14 px Durchmesser
         draw.ellipse((t.width - t.PAD - 2 * r, h // 2 - r,
                       t.width - t.PAD, h // 2 + r), fill=t.IN if ok else t.DANGER)
         return h
@@ -158,7 +169,7 @@ class Screens:
         mx, my = (t.width - mw) // 2, t.height - mh - t.s(11)
         armed = state["multiplier"] > 1
         draw.rounded_rectangle((mx, my, mx + mw, my + mh), radius=t.RADIUS,
-                               fill=(0x13, 0x22, 0x31) if armed else t.SURFACE,
+                               fill=t.SELECTED if armed else t.SURFACE,
                                outline=t.ACCENT if armed else t.LINE, width=2)
         label = "×%d" % state["multiplier"]
         w = draw.textlength(label, font=t.font_mult)
@@ -206,7 +217,7 @@ class Screens:
                                outline=t.LINE, width=1)
         undo_w = t.s(98)   # 196 px: "Rückgängig" misst bei 26 px 172 px plus Innenrand
         pad = t.s(8)
-        inner_x1 = x1 - pad - undo_w - t.s(7)
+        inner_x1 = (x1 - pad - undo_w - t.s(7)) if res.get("undoable") else (x1 - pad)
 
         tick_r = t.s(17)
         cx, cy = x0 + pad + tick_r, y + pad + tick_r
@@ -267,7 +278,7 @@ class Screens:
                 continue
             gewaehlt = (state.get("selected_id", 0) == item["id"])
             draw.rectangle((0, vy, t.width, vy + vh),
-                           fill=(0x13, 0x22, 0x31) if gewaehlt
+                           fill=t.SELECTED if gewaehlt
                            else (t.SURFACE if i % 2 == 0 else t.SURFACE_ALT))
             if gewaehlt:
                 draw.rectangle((0, vy, t.s(3), vy + vh), fill=t.ACCENT)
@@ -286,7 +297,7 @@ class Screens:
         if total > view_h and state["scrolling"]:
             bh = max(t.s(14), int(view_h * view_h / total))
             by = y0 + int(max(0.0, min(1.0, off / max(1, sv.max_offset))) * (view_h - bh))
-            draw.rounded_rectangle((t.width - t.s(4), by, t.width - t.s(2), by + bh),
+            draw.rounded_rectangle((t.width - t.s(3), by, t.width - t.s(1), by + bh),
                                    radius=t.s(1), fill=t.FG_DIM)
 
         self.listheader(draw, "Lagerort wählen", state["api_ok"], rects)
@@ -359,7 +370,7 @@ class Screens:
             sbh = max(t.s(14), int(view_h * view_h / total))
             sby = y0 + int(max(0.0, min(1.0, off / max(1, sv.max_offset)))
                            * (view_h - sbh))
-            draw.rounded_rectangle((t.width - t.s(4), sby, t.width - t.s(2), sby + sbh),
+            draw.rounded_rectangle((t.width - t.s(3), sby, t.width - t.s(1), sby + sbh),
                                    radius=t.s(1), fill=t.FG_DIM)
 
         self.listheader(draw, "Letzte Scans", state["api_ok"], rects)
@@ -375,7 +386,7 @@ class Screens:
         Unterkante zu nahe.
         """
         t = self.t
-        draw.rectangle((0, 0, t.width, t.height), fill=(0x05, 0x07, 0x0A))
+        draw.rectangle((0, 0, t.width, t.height), fill=t.SCRIM)
         cw, ch, gap = t.s(48), t.s(40), t.s(6)
         gw = 4 * cw + 3 * gap
         gh = 3 * ch + 2 * gap
