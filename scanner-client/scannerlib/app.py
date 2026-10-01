@@ -20,7 +20,7 @@ FRAME_SECONDS = 1.0 / FPS
 RESULT_SECONDS = 4.0
 LOCATION_RETRY_INTERVAL = 30.0
 
-SCAN, LOCATIONS, HISTORY = "scan", "locations", "history"
+SCAN, LOCATIONS, HISTORY, MULT = "scan", "locations", "history", "mult"
 
 
 def hit(rect, px, py):
@@ -302,6 +302,9 @@ class App:
             self.screens.locations(draw, state, self._rects)
         elif self.screen == HISTORY:
             self.screens.history(draw, state, self._rects)
+        elif self.screen == MULT:
+            self.screens.scan(draw, state, self._rects)
+            self.screens.multiplier_sheet(draw, self._rects)
         else:
             self.screens.scan(draw, state, self._rects)
         self.display.flush(img)
@@ -349,7 +352,13 @@ class App:
         elif hit(r.get("undo"), px, py):
             self.undo(self.last_entry)
         elif hit(r.get("mult"), px, py):
-            self.multiplier = 1 if self.multiplier >= 12 else self.multiplier + 1
+            self.screen = MULT
+        elif self.screen == MULT:
+            for i, rect in enumerate(r.get("mcells", [])):
+                if hit(rect, px, py):
+                    self.multiplier = i + 1
+                    break
+            self.screen = SCAN          # auch ein Danebentippen schliesst
         elif self.screen == LOCATIONS:
             for i, rect in enumerate(r.get("rows", [])):
                 if hit(rect, px, py):

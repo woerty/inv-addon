@@ -286,6 +286,40 @@ class Screens:
         self.status_dot(draw, state["api_ok"], in_subheader=True)
 
 
+    # ---------- Mengenauswahl ----------
+
+    def multiplier_sheet(self, draw, rects):
+        """x1 bis x12 als 4x3-Raster ueber dem Scan-Bildschirm.
+
+        Vier Spalten, weil das Raster damit 420x264 px misst und bequem ins
+        Bild passt; bei drei Spalten kaeme es mit der Ueberschrift der
+        Unterkante zu nahe.
+        """
+        t = self.t
+        draw.rectangle((0, 0, t.width, t.height), fill=(0x05, 0x07, 0x0A))
+        cw, ch, gap = t.s(48), t.s(40), t.s(6)
+        gw = 4 * cw + 3 * gap
+        gh = 3 * ch + 2 * gap
+        x0 = (t.width - gw) // 2
+        y0 = (t.height - gh) // 2 + t.s(8)
+
+        _center(draw, "Menge je Scan", t.font_sm, t.FG_DIM, y0 - t.s(22), t.width)
+        cells = []
+        for n in range(1, 13):
+            r, c = divmod(n - 1, 4)
+            x = x0 + c * (cw + gap)
+            y = y0 + r * (ch + gap)
+            draw.rounded_rectangle((x, y, x + cw, y + ch), radius=t.RADIUS_SM,
+                                   fill=t.SURFACE_ALT, outline=t.LINE, width=2)
+            label = "×%d" % n
+            w = draw.textlength(label, font=t.font_md)
+            draw.text((x + (cw - w) / 2, y + (ch - t.font_md.size) / 2 - t.s(1)),
+                      label, font=t.font_md, fill=t.FG)
+            cells.append((x, y, x + cw, y + ch))
+        rects["mcells"] = cells
+
+
+
 def _ago(seconds):
     if seconds < 60:
         return "gerade"
