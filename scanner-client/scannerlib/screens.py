@@ -88,6 +88,34 @@ class Screens:
             x, y = t.PAD + r, t.height - t.PAD - r
         draw.ellipse((x - r, y - r, x + r, y + r), fill=t.IN if ok else t.DANGER)
 
+    def listheader(self, draw, title, ok, rects):
+        """Eine 80-px-Leiste fuer Lagerort und Verlauf: zurueck, Titel, Punkt.
+
+        Ersetzt dort Modusleiste plus Unterzeile. Das gibt dem Zurueck-Knopf
+        Fingermass und der Liste eine ganze Zeile mehr -- zwei Leisten
+        uebereinander kosteten 160 der 480 px.
+        """
+        t = self.t
+        h = t.HEADER_H
+        draw.rectangle((0, 0, t.width, h), fill=t.BG)
+        draw.line((0, h, t.width, h), fill=t.LINE)
+        bw, bh = t.s(50), t.s(30)
+        bx, by = t.s(6), (h - bh) // 2
+        draw.rounded_rectangle((bx, by, bx + bw, by + bh),
+                               radius=t.RADIUS_SM, fill=t.SURFACE_ALT)
+        w = draw.textlength("\u2190", font=t.font_back)
+        draw.text((bx + (bw - w) / 2, by + (bh - t.font_back.size) / 2 - t.s(1)),
+                  "\u2190", font=t.font_back, fill=t.FG)
+        # Trefferflaeche groesser als der gezeichnete Knopf: bis an den Rand
+        # und ueber die volle Hoehe der Leiste.
+        rects["back"] = (0, 0, bx + bw + t.s(12), h)
+        _center(draw, title, t.font_sm, t.FG_DIM, (h - t.font_sm.size) / 2 - t.s(1),
+                t.width)
+        r = t.s(7)
+        draw.ellipse((t.width - t.PAD - 2 * r, h // 2 - r,
+                      t.width - t.PAD, h // 2 + r), fill=t.IN if ok else t.DANGER)
+        return h
+
     def subheader(self, draw, title, rects):
         """Zurueck-Pfeil und Titel. Nur auf Lagerort und Verlauf."""
         t = self.t
@@ -116,10 +144,10 @@ class Screens:
         if state["mode"] == "in":
             loc = state["location"]
             label = "→ " + (loc["name"] if loc else "Ohne Ort")
-            draw.text((t.PAD, y + t.s(5)), label, font=t.font_sm, fill=t.ACCENT)
-            rects["loc"] = (0, y, t.width, y + t.s(26))
-            draw.line((0, y + t.s(26), t.width, y + t.s(26)), fill=t.LINE)
-            y += t.s(26)
+            draw.text((t.PAD, y + t.s(12)), label, font=t.font_sm, fill=t.ACCENT)
+            rects["loc"] = (0, y, t.width, y + t.s(40))
+            draw.line((0, y + t.s(40), t.width, y + t.s(40)), fill=t.LINE)
+            y += t.s(40)
 
         _center(draw, state["status"], t.font_md, t.FG_DIM, y + t.s(9), t.width)
         y += t.s(9) + t.font_md.size + t.s(6)
@@ -199,7 +227,7 @@ class Screens:
         Leisten malen deckend und decken das zu.
         """
         t = self.t
-        y0 = t.HEADER_H + t.SUBHEADER_H
+        y0 = t.HEADER_H
 
         sv = state["scroll"]
         items = state["items"]
@@ -217,15 +245,19 @@ class Screens:
             if vh <= 0:
                 row_rects.append(None)
                 continue
+            gewaehlt = (state.get("selected_id", 0) == item["id"])
             draw.rectangle((0, vy, t.width, vy + vh),
-                           fill=t.SURFACE if i % 2 == 0 else t.SURFACE_ALT)
+                           fill=(0x13, 0x22, 0x31) if gewaehlt
+                           else (t.SURFACE if i % 2 == 0 else t.SURFACE_ALT))
+            if gewaehlt:
+                draw.rectangle((0, vy, t.s(3), vy + vh), fill=t.ACCENT)
             draw.line((t.s(5), vy + vh - 1, t.width - t.s(5), vy + vh - 1), fill=t.LINE)
             ty = ry + (t.ROW_H - t.font_md.size) / 2 - t.s(1)
             if y0 - t.ROW_H < ty < t.height:
                 draw.text((t.s(10), ty),
                           ellipsize(draw, item["name"], t.font_md, t.width - t.s(24)),
                           font=t.font_md,
-                          fill=t.ACCENT if item["id"] is None else t.FG)
+                          fill=t.ACCENT if (item["id"] is None or gewaehlt) else t.FG)
             row_rects.append((0, vy, t.width, vy + vh))
         rects["rows"] = row_rects
 
@@ -237,26 +269,22 @@ class Screens:
             draw.rounded_rectangle((t.width - t.s(4), by, t.width - t.s(2), by + bh),
                                    radius=t.s(1), fill=t.FG_DIM)
 
-        self.header(draw, state["mode"], rects)
-        self.subheader(draw, "Lagerort wählen", rects)
-        self.status_dot(draw, state["api_ok"], in_subheader=True)
+        self.listheader(draw, "Lagerort wählen", state["api_ok"], rects)
 
     # ---------- Verlauf ----------
 
     def history(self, draw, state, rects):
         t = self.t
-        self.header(draw, state["mode"], rects)
-        y0 = self.subheader(draw, "Letzte Scans", rects)
+        y0 = self.listheader(draw, "Letzte Scans", state["api_ok"], rects)
 
         entries = state["entries"]
         if not entries:
             _center(draw, "noch nichts gescannt", t.font_sm, t.FG_DIM,
                     y0 + t.s(30), t.width)
-            self.status_dot(draw, state["api_ok"], in_subheader=True)
             rects["hrows"] = []
             return
 
-        bw, bh = t.s(36), t.s(32)
+        bw, bh = t.s(42), t.s(42)   # 84x84, Fingermass
         row_rects = []
         for i, e in enumerate(entries):
             ry = y0 + i * t.ROW_H
@@ -291,7 +319,6 @@ class Screens:
                       font=t.font_md, fill=t.FG)
             row_rects.append((bx, by, bx + bw, by + bh))
         rects["hrows"] = row_rects
-        self.status_dot(draw, state["api_ok"], in_subheader=True)
 
 
     # ---------- Mengenauswahl ----------

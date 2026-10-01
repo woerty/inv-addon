@@ -97,3 +97,43 @@ class TestLeerlauf(unittest.TestCase):
         app = make_app(FakeAPI(), mode="in", idle_reset_s=0)
         self.assertFalse(app._check_idle(now=99999.0))
         self.assertEqual(app.mode, "in")
+
+
+class TestRueckgaengigEhrlichkeit(unittest.TestCase):
+    """Die Spezifikation verlangt zweimal ausdruecklich: lieber unbequem
+    ehrlich als stillschweigend falsch."""
+
+    def test_fehlgeschlagene_ruecknahme_behaelt_den_beleg(self):
+        app = make_app(FakeAPI())
+        e = app.book("111", count=1)
+        app.api.fail_at = len(app.api.calls) + 1     # die Gegenbuchung scheitert
+        app.undo(e)
+        self.assertIn(e, app.log._entries)            # Beleg bleibt
+        self.assertEqual(app.last_result["kind"], "warn")
+        self.assertNotIn("zurückgenommen", app.last_result["meta"].split(" von ")[0])
+
+    def test_teilweise_ruecknahme_reduziert_die_menge(self):
+        app = make_app(FakeAPI())
+        e = app.book("111", count=5)
+        app.api.fail_at = len(app.api.calls) + 3      # 2 von 5 gehen durch
+        app.undo(e)
+        self.assertEqual(e.booked, 3)
+        self.assertIn("2 von 5", app.last_result["meta"])
+
+    def test_vierhundertvier_ist_keine_fehlende_verbindung(self):
+        class Gone(FakeAPI):
+            def scan_in(self, barcode, storage_location_id=None):
+                self.calls.append(("in", barcode))
+                return (404, {"status": "unknown_custom_product"})
+        app = make_app(Gone())
+        e = app.book("EIGEN-7", count=1)
+        app.undo(e)
+        self.assertTrue(app.api_ok)                   # Verbindung stand ja
+        self.assertEqual(app.last_result["kind"], "warn")
+
+    def test_erfolgreiche_ruecknahme_macht_den_punkt_wieder_gruen(self):
+        app = make_app(FakeAPI(), api_ok=False)
+        e = app.book("111", count=1)
+        app.api_ok = False
+        app.undo(e)
+        self.assertTrue(app.api_ok)

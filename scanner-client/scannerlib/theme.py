@@ -67,8 +67,8 @@ class Theme:
         self.PAD = self.s(8)          # Rand 16
         self.RADIUS = self.s(6)       # Karten 12
         self.RADIUS_SM = self.s(4)    # Knoepfe 8
-        self.HEADER_H = self.s(36)    # 72
-        self.SUBHEADER_H = self.s(30)  # 60
+        self.HEADER_H = self.s(40)    # 80, Fingermass
+        self.SUBHEADER_H = self.s(40)  # 80
         self.ROW_H = self.s(48)       # 96, eine Fingerkuppe
         self.CARD_MIN_H = self.s(64)  # 128
 

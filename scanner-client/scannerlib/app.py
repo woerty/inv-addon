@@ -58,6 +58,7 @@ class App:
         self.last_activity = time.monotonic()
 
         self.scroll = None
+        self._swallow = False
         self._dirty = True
         self._rects = {}
         self._locations_lock = threading.Lock()
@@ -226,13 +227,19 @@ class App:
         """Gegenbuchung: ein scan_in hebt ein scan_out auf und umgekehrt.
 
         Keine echte Ruecknahme -- zwischen Scan und Ruecknahme kann jemand
-        ueber die Weboberflaeche eingegriffen haben. War es das letzte
-        Exemplar und der Artikel wurde geloescht, legt die Gegenbuchung ihn
-        neu an und der Lagerort fehlt; das wird angezeigt, nicht verschwiegen.
+        ueber die Weboberflaeche eingegriffen haben.
+
+        Zwei Dinge muessen ehrlich bleiben, weil die Spezifikation das
+        ausdruecklich verlangt. Erstens: schlaegt die Gegenbuchung fehl,
+        bleibt der Beleg im Verlauf stehen, mit der verbliebenen Menge --
+        sonst waere das Inventar dauerhaft falsch und der einzige Hinweis
+        darauf geloescht. Zweitens: war es das letzte Exemplar und der
+        Artikel wurde geloescht, legt die Gegenbuchung ihn neu an und der
+        Lagerort fehlt.
         """
         if entry is None:
             return
-        lost, status = False, 200
+        lost, undone, status = False, 0, 200
         for _ in range(entry.booked):
             if entry.mode == "out":
                 status, data = self.api.scan_in(entry.barcode)
@@ -241,16 +248,28 @@ class App:
             else:
                 status, data = self.api.scan_out(entry.barcode)
             if status != 200:
-                self.api_ok = False
                 break
-        self.log.remove(entry)
+            undone += 1
+
+        # Nur ein ausgebliebener Status heisst fehlende Verbindung. Ein 404
+        # oder 401 kam ueber eine funktionierende Leitung.
+        if status is None:
+            self.api_ok = False
+        elif undone:
+            self.api_ok = True
+
         entry.location_lost = lost
-        meta = "zurückgenommen"
-        if lost:
-            meta = "wiederhergestellt, Lagerort fehlt"
+        if undone >= entry.booked:
+            self.log.remove(entry)
+            self.last_entry = None
+            meta = "wiederhergestellt, Lagerort fehlt" if lost else "zurückgenommen"
+            kind = "warn" if lost else "ok"
+        else:
+            entry.booked -= undone
+            meta = "%d von %d zurückgenommen" % (undone, undone + entry.booked)
+            kind = "warn"
         self.last_result = {"name": entry.name, "meta": meta,
-                            "kind": "warn" if lost else "ok", "undoable": False}
-        self.last_entry = None
+                            "kind": kind, "undoable": False}
         self.touch_activity()
         self.invalidate()
 
@@ -291,6 +310,7 @@ class App:
             "scrolling": self.scroll is not None and (
                 self.scroll.is_dragging or abs(self.scroll.velocity) > 0),
             "entries": self.log.entries, "now": time.monotonic(),
+            "selected_id": self.location["id"] if self.location else None,
         }
 
     def render(self):
@@ -298,12 +318,21 @@ class App:
         draw = ImageDraw.Draw(img)
         self._rects = {}
         state = self._state()
+        # Die Liste festhalten, aus der die Rechtecke entstanden sind. Ein
+        # Hintergrund-Abruf kann self.locations zwischen Zeichnen und
+        # Beruehrung ersetzen -- dann zeigt derselbe Index auf einen anderen
+        # Ort oder gar keinen mehr.
+        self._rendered_items = state["items"]
         if self.screen == LOCATIONS:
             self.screens.locations(draw, state, self._rects)
         elif self.screen == HISTORY:
             self.screens.history(draw, state, self._rects)
         elif self.screen == MULT:
             self.screens.scan(draw, state, self._rects)
+            # Das Raster deckt den Scan-Bildschirm vollstaendig ab. Ohne das
+            # Leeren blieben dessen Trefferflaechen aktiv und ein Tipp auf
+            # eine Mengenkachel haette "Rueckgaengig" ausgeloest.
+            self._rects = {}
             self.screens.multiplier_sheet(draw, self._rects)
         else:
             self.screens.scan(draw, state, self._rects)
@@ -314,9 +343,11 @@ class App:
     def handle_touch(self, px, py, kind):
         if self.display.wake():
             self._swallow = True          # Aufwecker loest nichts aus
-        if getattr(self, "_swallow", False):
+        if self._swallow:
             if kind == "touch_up":
                 self._swallow = False
+                if self.scroll is not None:
+                    self.scroll.on_up(time.monotonic())   # Ziehzustand aufraeumen
             return
         self.touch_activity()
 
@@ -362,7 +393,10 @@ class App:
         elif self.screen == LOCATIONS:
             for i, rect in enumerate(r.get("rows", [])):
                 if hit(rect, px, py):
-                    item = self._items()[i]
+                    items = getattr(self, "_rendered_items", self._items())
+                    if i >= len(items):
+                        break
+                    item = items[i]
                     self.location = None if item["id"] is None else item
                     self.mode = "in"
                     self.screen = SCAN
@@ -378,13 +412,26 @@ class App:
         self.invalidate()
 
     def _open_locations(self):
+        """Liste oeffnen und dabei den Scrollstand behalten.
+
+        Ein Fehlgriff kostete sonst nicht nur einen zweiten Tipp, sondern das
+        erneute Herunterscrollen -- die Liste sprang jedes Mal nach oben.
+        """
         self.screen = LOCATIONS
-        y0 = self.theme.HEADER_H + self.theme.SUBHEADER_H
-        self.scroll = ScrollView(view_h=self.theme.height - y0,
-                                 content_h=len(self._items()) * self.theme.ROW_H)
+        y0 = self.theme.HEADER_H
+        if self.scroll is None:
+            self.scroll = ScrollView(view_h=self.theme.height - y0,
+                                     content_h=len(self._items()) * self.theme.ROW_H)
+        else:
+            self._sync_scroll()
         self._refresh_locations_async()
 
     def handle_touch_down(self, py):
+        # Nicht waehrend einer Aufweck-Beruehrung ziehen: sonst startet hier
+        # on_down, das zugehoerige touch_up wird verschluckt, und is_dragging
+        # bleibt dauerhaft True -- die Liste federt dann nie zurueck.
+        if self._swallow:
+            return
         if self.screen == LOCATIONS and self.scroll is not None:
             self.scroll.on_down(py, time.monotonic())
 
