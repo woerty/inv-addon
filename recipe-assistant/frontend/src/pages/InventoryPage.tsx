@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
   Button,
-  Checkbox,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -27,7 +25,6 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import LocalGroceryStoreIcon from "@mui/icons-material/LocalGroceryStore";
 import PrintIcon from "@mui/icons-material/Print";
 import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
-import { IconButton } from "@mui/material";
 import { useInventory } from "../hooks/useInventory";
 import { useNotification } from "../components/NotificationProvider";
 import { useRegisterRefresh } from "../components/RefreshProvider";
@@ -35,16 +32,31 @@ import { exportData, importData, relookupBarcode, relookupAllUnknown, backfillIm
 import { usePicnicStatus } from "../hooks/usePicnic";
 import { usePicnicPendingOrders } from "../hooks/usePicnicOrders";
 import { useTrackedProducts } from "../hooks/useTrackedProducts";
-import InventoryRestockButton from "../components/tracked/InventoryRestockButton";
+import InventoryRow, { type InventoryUpdate } from "../components/inventory/InventoryRow";
 import TrackedProductForm from "../components/tracked/TrackedProductForm";
-import type { TrackedProduct } from "../types";
+import type { InventoryItem, TrackedProduct } from "../types";
 
 type SortKey = "name" | "quantity" | "category" | "barcode" | "added_date";
 type Order = "asc" | "desc";
 
+const collator = new Intl.Collator("de", { sensitivity: "base", numeric: true });
+
+const compareBy = (key: SortKey) => (a: InventoryItem, b: InventoryItem): number => {
+  if (key === "quantity") return a.quantity - b.quantity;
+  return collator.compare(a[key] ?? "", b[key] ?? "");
+};
+
+const COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "name", label: "Name" },
+  { key: "barcode", label: "Barcode" },
+  { key: "quantity", label: "Menge" },
+  { key: "category", label: "Kategorie" },
+  { key: "added_date", label: "Hinzugefügt" },
+];
+
 const InventoryPage = () => {
   const inventory = useInventory();
-  const { items, loading, refetch } = inventory;
+  const { items, loading, refetch, update: updateItem, delete: deleteItem } = inventory;
   const { notify } = useNotification();
   const { status: picnicStatus } = usePicnicStatus();
   const navigate = useNavigate();
@@ -99,27 +111,21 @@ const InventoryPage = () => {
     }
   };
 
-  const handleToggleSheet = async (barcode: string, value: boolean) => {
+  const handleToggleSheet = useCallback(async (barcode: string, value: boolean) => {
     try {
-      await inventory.update(barcode, { include_in_sheet: value });
+      await updateItem(barcode, { include_in_sheet: value });
     } catch (e) {
       notify(e instanceof Error ? e.message : "Fehler", "error");
     }
-  };
+  }, [updateItem, notify]);
 
-  const openTrackedForm = (barcode: string, existing?: TrackedProduct) => {
+  const openTrackedForm = useCallback((barcode: string, existing?: TrackedProduct) => {
     setTrackedFormBarcode(barcode);
     setTrackedFormExisting(existing);
     setTrackedFormOpen(true);
-  };
+  }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Refetch every time this page is rendered (navigation back from scan, etc.)
-  useEffect(() => {
-    refetch();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const [search, setSearch] = useState("");
 
   const handleExport = async () => {
     try {
@@ -173,7 +179,7 @@ const InventoryPage = () => {
     }
   };
 
-  const handleRelookup = async (barcode: string) => {
+  const handleRelookup = useCallback(async (barcode: string) => {
     try {
       const result = await relookupBarcode(barcode);
       notify(result.message, result.updated ? "success" : "info");
@@ -181,82 +187,56 @@ const InventoryPage = () => {
     } catch (e) {
       notify(e instanceof Error ? e.message : "Fehler", "error");
     }
-  };
+  }, [refetch, notify]);
+
+  useRegisterRefresh(refetch);
+
+  // Search and sort run client-side over the full list: no request per
+  // keystroke, and a refetch can never drop the active filter.
+  const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("name");
   const [order, setOrder] = useState<Order>("asc");
+  const deferredSearch = useDeferredValue(search);
 
-  const refreshInventory = useCallback(
-    () => refetch(search, sortBy, order),
-    [refetch, search, sortBy, order],
-  );
-  useRegisterRefresh(refreshInventory);
-  const [editFields, setEditFields] = useState<
-    Record<number, { quantity?: string; storage_location?: string; expiration_date?: string }>
-  >({});
+  const visibleItems = useMemo(() => {
+    const needle = deferredSearch.trim().toLocaleLowerCase("de");
+    const filtered = needle
+      ? items.filter(
+          (i) =>
+            i.name.toLocaleLowerCase("de").includes(needle) ||
+            (i.category ?? "").toLocaleLowerCase("de").includes(needle),
+        )
+      : [...items];
+    const cmp = compareBy(sortBy);
+    const dir = order === "asc" ? 1 : -1;
+    return filtered.sort((a, b) => dir * cmp(a, b) || a.id - b.id);
+  }, [items, deferredSearch, sortBy, order]);
 
   const handleSort = (key: SortKey) => {
-    const newOrder = sortBy === key && order === "asc" ? "desc" : "asc";
+    setOrder(sortBy === key && order === "asc" ? "desc" : "asc");
     setSortBy(key);
-    setOrder(newOrder);
-    refetch(search, key, newOrder);
   };
 
-  const handleSearch = (value: string) => {
-    setSearch(value);
-    refetch(value, sortBy, order);
-  };
-
-  const handleFieldChange = (id: number, field: string, value: string) => {
-    setEditFields((prev) => ({
-      ...prev,
-      [id]: { ...prev[id], [field]: value },
-    }));
-  };
-
-  const handleUpdate = async (id: number, barcode: string) => {
-    const fields = editFields[id];
-    if (!fields) return;
-
+  const handleSave = useCallback(async (barcode: string, data: InventoryUpdate) => {
     try {
-      const updateData: { quantity?: number; storage_location?: string; expiration_date?: string } = {};
-      if (fields.quantity !== undefined) {
-        const qty = parseInt(fields.quantity, 10);
-        if (isNaN(qty) || qty < 0) return;
-        if (qty === 0 && !window.confirm("Artikel wirklich löschen?")) return;
-        updateData.quantity = qty;
-      }
-      if (fields.storage_location !== undefined) updateData.storage_location = fields.storage_location;
-      if (fields.expiration_date !== undefined) updateData.expiration_date = fields.expiration_date;
-
-      const result = await inventory.update(barcode, updateData);
+      const result = await updateItem(barcode, data);
       notify(result.message, "success");
-      setEditFields((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
+      return true;
     } catch (e) {
       notify(e instanceof Error ? e.message : "Fehler beim Aktualisieren", "error");
+      return false;
     }
-  };
+  }, [updateItem, notify]);
 
-  const handleDelete = async (barcode: string) => {
+  const handleDelete = useCallback(async (barcode: string) => {
     if (!window.confirm("Artikel wirklich löschen?")) return;
     try {
-      const result = await inventory.delete(barcode);
+      const result = await deleteItem(barcode);
       notify(result.message, "success");
     } catch (e) {
       notify(e instanceof Error ? e.message : "Fehler beim Löschen", "error");
     }
-  };
-
-  const columns: { key: SortKey; label: string }[] = [
-    { key: "name", label: "Name" },
-    { key: "barcode", label: "Barcode" },
-    { key: "quantity", label: "Menge" },
-    { key: "category", label: "Kategorie" },
-    { key: "added_date", label: "Hinzugefügt" },
-  ];
+  }, [deleteItem, notify]);
 
   return (
     <Paper variant="outlined" sx={{ p: 3, m: { xs: 1, md: 2 }, borderRadius: 3 }}>
@@ -332,7 +312,7 @@ const InventoryPage = () => {
             variant="outlined"
             size="small"
             startIcon={<LocalGroceryStoreIcon />}
-            onClick={() => navigate("/picnic-import")}
+            onClick={() => navigate("/picnic", { state: { tab: "orders" } })}
           >
             Picnic-Bestellung importieren
           </Button>
@@ -344,13 +324,13 @@ const InventoryPage = () => {
         fullWidth
         margin="normal"
         value={search}
-        onChange={(e) => handleSearch(e.target.value)}
+        onChange={(e) => setSearch(e.target.value)}
       />
       <TableContainer>
         <Table>
           <TableHead>
             <TableRow>
-              {columns.map((col) => (
+              {COLUMNS.map((col) => (
                 <TableCell key={col.key}>
                   <TableSortLabel
                     active={sortBy === col.key}
@@ -369,131 +349,20 @@ const InventoryPage = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {items.map((item) => (
-              <TableRow
+            {visibleItems.map((item) => (
+              <InventoryRow
                 key={item.id}
-                sx={{
-                  ...(item.quantity === 0 && {
-                    backgroundColor: "rgba(219, 68, 55, 0.14)",
-                  }),
-                }}
-              >
-                <TableCell>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    {item.image_url && (
-                      <Box
-                        component="img"
-                        src={item.image_url}
-                        alt=""
-                        sx={{ width: 44, height: 44, objectFit: "contain", flexShrink: 0, borderRadius: 1 }}
-                      />
-                    )}
-                    <span>
-                      {item.name}
-                      {item.name === "Unbekanntes Produkt" && (
-                        <IconButton size="small" onClick={() => handleRelookup(item.barcode)} title="Nochmal nachschlagen">
-                          <RefreshIcon fontSize="small" />
-                        </IconButton>
-                      )}
-                    </span>
-                  </Box>
-                </TableCell>
-                <TableCell>{item.barcode}</TableCell>
-                <TableCell>
-                  <TextField
-                    type="number"
-                    size="small"
-                    sx={{ width: 80 }}
-                    value={editFields[item.id]?.quantity ?? item.quantity}
-                    onChange={(e) => handleFieldChange(item.id, "quantity", e.target.value)}
-                  />
-                  {(barcodeToOrderQty[item.barcode] ?? 0) > 0 && (
-                    <Chip
-                      label={`${barcodeToOrderQty[item.barcode]} in Bestellung`}
-                      size="small"
-                      color="warning"
-                      sx={{ mt: 0.5 }}
-                    />
-                  )}
-                  {item.quantity === 0 && trackedByBarcode.has(item.barcode) && (
-                    <Typography
-                      variant="caption"
-                      color={(barcodeToOrderQty[item.barcode] ?? 0) > 0 ? "warning.main" : "error"}
-                      display="block"
-                      sx={{ mt: 0.5 }}
-                    >
-                      {(barcodeToOrderQty[item.barcode] ?? 0) > 0 ? "in Bestellung" : "leer, nachbestellen"}
-                    </Typography>
-                  )}
-                </TableCell>
-                <TableCell>{item.category}</TableCell>
-                <TableCell>{new Date(item.added_date).toLocaleDateString("de-DE")}</TableCell>
-                <TableCell>
-                  <TextField
-                    size="small"
-                    sx={{ width: 130 }}
-                    value={
-                      editFields[item.id]?.storage_location ??
-                      item.storage_location?.name ??
-                      ""
-                    }
-                    onChange={(e) =>
-                      handleFieldChange(item.id, "storage_location", e.target.value)
-                    }
-                  />
-                </TableCell>
-                <TableCell>
-                  <TextField
-                    type="date"
-                    size="small"
-                    sx={{ width: 150 }}
-                    slotProps={{ inputLabel: { shrink: true } }}
-                    value={editFields[item.id]?.expiration_date ?? item.expiration_date ?? ""}
-                    onChange={(e) =>
-                      handleFieldChange(item.id, "expiration_date", e.target.value)
-                    }
-                  />
-                </TableCell>
-                <TableCell>
-                  <Checkbox
-                    checked={item.include_in_sheet}
-                    onChange={(e) => handleToggleSheet(item.barcode, e.target.checked)}
-                  />
-                </TableCell>
-                <TableCell sx={{ whiteSpace: "nowrap" }}>
-                  <Button
-                    variant="contained"
-                    size="small"
-                    sx={{ mr: 1 }}
-                    onClick={() => handleUpdate(item.id, item.barcode)}
-                    disabled={!editFields[item.id]}
-                  >
-                    Speichern
-                  </Button>
-
-                  <Button
-                    variant="outlined"
-                    color="error"
-                    size="small"
-                    onClick={() => handleDelete(item.barcode)}
-                  >
-                    Löschen
-                  </Button>
-                </TableCell>
-                <TableCell>
-                  <InventoryRestockButton
-                    tracked={trackedByBarcode.get(item.barcode)}
-                    onClick={() =>
-                      openTrackedForm(
-                        item.barcode,
-                        trackedByBarcode.get(item.barcode)
-                      )
-                    }
-                  />
-                </TableCell>
-              </TableRow>
+                item={item}
+                tracked={trackedByBarcode.get(item.barcode)}
+                orderQty={barcodeToOrderQty[item.barcode] ?? 0}
+                onSave={handleSave}
+                onDelete={handleDelete}
+                onToggleSheet={handleToggleSheet}
+                onRelookup={handleRelookup}
+                onOpenTracked={openTrackedForm}
+              />
             ))}
-            {!loading && items.length === 0 && (
+            {!loading && visibleItems.length === 0 && (
               <TableRow>
                 <TableCell colSpan={9} align="center">
                   Keine Artikel gefunden.

@@ -16,7 +16,6 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import DashboardIcon from "@mui/icons-material/Dashboard";
 import InventoryIcon from "@mui/icons-material/Inventory2";
 import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
-import CropFreeIcon from "@mui/icons-material/CropFree";
 import RestaurantIcon from "@mui/icons-material/Restaurant";
 import ChatIcon from "@mui/icons-material/Chat";
 import PeopleIcon from "@mui/icons-material/People";
@@ -27,10 +26,9 @@ import { usePicnicStatus } from "../hooks/usePicnic";
 import { useRefresh } from "./RefreshProvider";
 
 const NAV_ITEMS = [
-  { path: "/", label: "Dashboard", icon: <DashboardIcon /> },
-  { path: "/inventory", label: "Inventar", icon: <InventoryIcon /> },
+  { path: "/", label: "Inventar", icon: <InventoryIcon /> },
+  { path: "/dashboard", label: "Dashboard", icon: <DashboardIcon /> },
   { path: "/scan", label: "Scannen", icon: <QrCodeScannerIcon /> },
-  { path: "/scan-station", label: "Scan-Station", icon: <CropFreeIcon /> },
   { path: "/recipes", label: "Rezepte", icon: <RestaurantIcon /> },
   { path: "/chat", label: "Chat", icon: <ChatIcon /> },
   { path: "/persons", label: "Personen", icon: <PeopleIcon /> },

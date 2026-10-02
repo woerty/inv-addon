@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -10,9 +11,10 @@ import {
 
 type RefreshFn = () => Promise<unknown> | unknown;
 
+/** Register a refetch fn; returns an unregister fn. */
+type RegisterFn = (fn: RefreshFn) => () => void;
+
 interface RefreshContextValue {
-  /** Register a refetch fn; returns an unregister fn. */
-  register: (fn: RefreshFn) => () => void;
   /** Run all currently-registered refetch fns in parallel. */
   refreshAll: () => Promise<void>;
   /** True while refreshAll is in flight. */
@@ -21,6 +23,8 @@ interface RefreshContextValue {
   canRefresh: boolean;
 }
 
+// Split so pages that only register don't re-render when `refreshing` flips.
+const RegisterContext = createContext<RegisterFn | null>(null);
 const RefreshContext = createContext<RefreshContextValue | null>(null);
 
 export function RefreshProvider({ children }: { children: ReactNode }) {
@@ -49,10 +53,15 @@ export function RefreshProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const value = useMemo(
+    () => ({ refreshAll, refreshing, canRefresh }),
+    [refreshAll, refreshing, canRefresh],
+  );
+
   return (
-    <RefreshContext.Provider value={{ register, refreshAll, refreshing, canRefresh }}>
-      {children}
-    </RefreshContext.Provider>
+    <RegisterContext.Provider value={register}>
+      <RefreshContext.Provider value={value}>{children}</RefreshContext.Provider>
+    </RegisterContext.Provider>
   );
 }
 
@@ -67,6 +76,7 @@ export function useRefresh(): RefreshContextValue {
  * Wrap `fn` in useCallback so the registration is stable across renders.
  */
 export function useRegisterRefresh(fn: RefreshFn): void {
-  const { register } = useRefresh();
+  const register = useContext(RegisterContext);
+  if (!register) throw new Error("useRegisterRefresh must be used within a RefreshProvider");
   useEffect(() => register(fn), [register, fn]);
 }

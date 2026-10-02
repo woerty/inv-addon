@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   getPicnicStatus,
   fetchPicnicImport,
@@ -16,34 +16,47 @@ import type {
   PicnicSearchResult,
 } from "../types";
 
-export function usePicnicStatus() {
-  const [status, setStatus] = useState<PicnicStatus | null>(null);
-  const [loading, setLoading] = useState(true);
+// /picnic/status is a live round-trip to Picnic. Share one result between the
+// navbar and every page instead of re-asking on each mount; revalidate in the
+// background once it is older than STATUS_MAX_AGE_MS.
+const STATUS_MAX_AGE_MS = 60_000;
+let statusCache: PicnicStatus | null = null;
+let statusFetchedAt = 0;
+let statusInflight: Promise<PicnicStatus> | null = null;
+const statusListeners = new Set<() => void>();
 
-  const refetch = useCallback(() => {
-    setLoading(true);
-    return getPicnicStatus()
-      .then((s) => {
-        setStatus(s);
-        return s;
-      })
-      .catch(() => {
-        const fallback: PicnicStatus = {
-          enabled: false,
-          needs_login: false,
-          account: null,
-        };
-        setStatus(fallback);
-        return fallback;
-      })
-      .finally(() => setLoading(false));
-  }, []);
+function loadPicnicStatus(force = false): Promise<PicnicStatus> {
+  if (statusInflight && !force) return statusInflight;
+  const request = getPicnicStatus()
+    .catch((): PicnicStatus => ({ enabled: false, needs_login: false, account: null }))
+    .then((s) => {
+      statusCache = s;
+      statusFetchedAt = Date.now();
+      if (statusInflight === request) statusInflight = null;
+      statusListeners.forEach((l) => l());
+      return s;
+    });
+  statusInflight = request;
+  return request;
+}
+
+const subscribeStatus = (listener: () => void) => {
+  statusListeners.add(listener);
+  return () => {
+    statusListeners.delete(listener);
+  };
+};
+
+export function usePicnicStatus() {
+  const status = useSyncExternalStore(subscribeStatus, () => statusCache);
 
   useEffect(() => {
-    refetch();
-  }, [refetch]);
+    if (Date.now() - statusFetchedAt > STATUS_MAX_AGE_MS) loadPicnicStatus();
+  }, []);
 
-  return { status, loading, refetch };
+  const refetch = useCallback(() => loadPicnicStatus(true), []);
+
+  return { status, loading: status === null, refetch };
 }
 
 export type LoginPhase =

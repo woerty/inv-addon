@@ -21,7 +21,7 @@ export default function PicnicLoginPage() {
   useEffect(() => {
     if (phase === "success") {
       refetch();
-      const t = setTimeout(() => navigate("/picnic-import"), 1500);
+      const t = setTimeout(() => navigate("/picnic", { state: { tab: "orders" } }), 1500);
       return () => clearTimeout(t);
     }
   }, [phase, navigate, refetch]);

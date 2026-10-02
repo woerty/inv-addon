@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useState } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { Alert, Snackbar } from "@mui/material";
 
 type Severity = "success" | "error" | "warning" | "info";
@@ -26,8 +26,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({
     setOpen(true);
   }, []);
 
+  // Stable value: showing/hiding the snackbar must not re-render every consumer.
+  const value = useMemo(() => ({ notify }), [notify]);
+
   return (
-    <NotificationContext.Provider value={{ notify }}>
+    <NotificationContext.Provider value={value}>
       {children}
       <Snackbar
         open={open}

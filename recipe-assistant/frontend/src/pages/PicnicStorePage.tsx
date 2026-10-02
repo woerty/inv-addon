@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { Alert, Badge, Box, CircularProgress, Container, Tab, Tabs } from "@mui/material";
 import { usePicnicStatus } from "../hooks/usePicnic";
 import { usePicnicCart } from "../hooks/usePicnicCart";
@@ -14,13 +15,19 @@ import ProductDetailModal from "../components/picnic/store/ProductDetailModal";
 import SubscribeDialog from "../components/picnic/SubscribeDialog";
 import type { PicnicSearchResult, TrackedProductCreate } from "../types";
 
+const ORDERS_TAB = 3;
+
 export default function PicnicStorePage() {
   const { status, loading: statusLoading } = usePicnicStatus();
   const { cart, loading: cartLoading, add: cartAdd, remove: cartRemove, clear: cartClear, refetch: cartRefetch } = usePicnicCart();
   const { orders, quantityMap: orderQuantities, loading: ordersLoading, refetch: ordersRefetch } = usePicnicPendingOrders();
   const { items: tracked, create: createTracked } = useTrackedProducts();
 
-  const [tab, setTab] = useState(0);
+  // Callers can deep-link a tab, e.g. the inventory's "Picnic-Bestellung importieren".
+  const location = useLocation();
+  const [tab, setTab] = useState(
+    (location.state as { tab?: string } | null)?.tab === "orders" ? ORDERS_TAB : 0,
+  );
   const [detailId, setDetailId] = useState<string | null>(null);
   const [subscribeTarget, setSubscribeTarget] = useState<PicnicSearchResult | null>(null);
 
@@ -53,7 +60,7 @@ export default function PicnicStorePage() {
 
   const handleOrderPlaced = useCallback(async () => {
     await Promise.all([cartRefetch(), ordersRefetch()]);
-    setTab(3);
+    setTab(ORDERS_TAB);
   }, [cartRefetch, ordersRefetch]);
 
   const handleSubscribe = useCallback(async (data: TrackedProductCreate) => {
