@@ -329,14 +329,12 @@ async def debug_raw_offers(
             try:
                 from urllib.parse import quote
 
-                from python_picnic_api2.helper import find_nodes_by_content
+                from python_picnic_api2.models.pml import find_all
 
                 path = f"/pages/search-page-results?search_term={quote(q)}"
                 raw_page = await client._call("_get", path)  # type: ignore[attr-defined]
                 body = raw_page.get("body", {}) if isinstance(raw_page, dict) else {}
-                tiles = find_nodes_by_content(
-                    body.get("child", {}), {"type": "SELLING_UNIT_TILE"}
-                )
+                tiles = find_all(body.get("child", {}), type="SELLING_UNIT_TILE")
                 result["search_tiles_full"] = tiles
             except Exception as e:  # pragma: no cover - debug aid
                 result["search_tiles_full_error"] = str(e)

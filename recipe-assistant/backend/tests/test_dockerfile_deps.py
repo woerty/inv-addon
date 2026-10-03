@@ -39,3 +39,17 @@ def test_pyproject_runtime_deps_are_in_dockerfile():
         f"Runtime dependencies in pyproject.toml missing from Dockerfile: {missing}. "
         "Add them to the `pip install` block in recipe-assistant/Dockerfile."
     )
+
+
+def test_dockerfile_uses_the_same_version_specs():
+    """A version cap set in one place only does nothing in the other: the
+    image is built from the Dockerfile list, local dev from pyproject."""
+    data = tomllib.loads(PYPROJECT.read_text())
+    dockerfile_specs = set(re.findall(r'"([^"]+)"', DOCKERFILE.read_text()))
+
+    drifted = sorted(
+        spec for spec in data["project"]["dependencies"] if spec not in dockerfile_specs
+    )
+    assert not drifted, (
+        f"Version specs differ between pyproject.toml and Dockerfile: {drifted}"
+    )

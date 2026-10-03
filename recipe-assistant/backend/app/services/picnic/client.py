@@ -63,6 +63,19 @@ class PicnicReauthRequired(Exception):
     """
 
 
+class PicnicAPIError(Exception):
+    """Picnic answered with an error payload ({"error": {"code": ...}}).
+
+    The library returns those like any other response instead of raising, so
+    a rejected cart write used to look like a success.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}" if message else code)
+        self.code = code
+        self.message = message
+
+
 def save_token(token: str) -> None:
     """Persist the auth token to the token cache path with chmod 600.
 
@@ -91,8 +104,50 @@ def reset_picnic_client() -> None:
 
 
 def _is_auth_error(exc: Exception) -> bool:
+    # The library signals a rejected token as PicnicAuthError("Picnic
+    # authentication error") -- no "401" in the text -- so match it by name.
+    if type(exc).__name__ == "PicnicAuthError":
+        return True
     s = str(exc).lower()
     return "401" in s or "unauthor" in s
+
+
+# python-picnic-api2 >= 2.0 returns pydantic models instead of the raw
+# dicts this codebase parses (cart decorators, order lines, PML pages ...).
+# Every model keeps the verbatim payload on `.raw`; unwrap at this boundary
+# so callers keep receiving exactly what the Picnic API sent.
+
+def _raw(value: Any) -> Any:
+    raw = getattr(value, "raw", None)
+    return raw if isinstance(raw, dict) else value
+
+
+def _cart(value: Any) -> dict[str, Any]:
+    """Unwrap a cart response; raise if Picnic rejected the request."""
+    raw = _raw(value)
+    error = raw.get("error") if isinstance(raw, dict) else None
+    if isinstance(error, dict) and error.get("code"):
+        raise PicnicAPIError(str(error["code"]), str(error.get("message") or ""))
+    return raw
+
+
+def _search_groups(result: Any) -> list[dict[str, Any]]:
+    """SearchResult -> the 1.x shape: [{"items": [sellingUnit + sole_article_id]}]."""
+    items = getattr(result, "items", None)
+    if items is None:
+        return result
+    hits = []
+    for item in items:
+        node = item.raw if isinstance(item.raw, dict) else {}
+        hits.append({**node.get("sellingUnit", {}), "sole_article_id": item.sole_article_id})
+    return [{"items": hits}]
+
+
+def _article_dict(article: Any) -> dict[str, Any] | None:
+    """Article -> the 1.x shape: {"id", "name"} with name "<producer> <title>"."""
+    if article is None or isinstance(article, dict):
+        return article
+    return {"id": article.id, "name": article.name}
 
 
 class PicnicClient:
@@ -187,7 +242,7 @@ class PicnicClient:
             raise
 
     async def search(self, query: str) -> list[dict[str, Any]]:
-        return await self._call("search", query)
+        return _search_groups(await self._call("search", query))
 
     async def get_article_by_gtin(self, ean: str) -> dict[str, Any] | None:
         """Look up a Picnic product by EAN/GTIN.
@@ -204,6 +259,7 @@ class PicnicClient:
                 log.debug("get_article_by_gtin miss for %s: %s", ean, e)
                 return None
             raise
+        result = _article_dict(result)
         if not result:
             return None
         if isinstance(result, dict) and result.get("id") and result.get("name"):
@@ -211,31 +267,31 @@ class PicnicClient:
         return None
 
     async def get_deliveries(self) -> list[dict[str, Any]]:
-        return await self._call("get_deliveries")
+        return [_raw(d) for d in await self._call("get_deliveries")]
 
     async def get_delivery(self, delivery_id: str) -> dict[str, Any]:
-        return await self._call("get_delivery", delivery_id)
+        return _raw(await self._call("get_delivery", delivery_id))
 
     async def get_cart(self) -> dict[str, Any]:
-        return await self._call("get_cart")
+        return _cart(await self._call("get_cart"))
 
     async def add_product(self, picnic_id: str, count: int = 1) -> dict[str, Any]:
-        return await self._call("add_product", picnic_id, count=count)
+        return _cart(await self._call("add_product", picnic_id, count=count))
 
     async def get_user(self) -> dict[str, Any]:
-        return await self._call("get_user")
+        return _raw(await self._call("get_user"))
 
     async def remove_product(self, picnic_id: str, count: int = 1) -> dict[str, Any]:
-        return await self._call("remove_product", picnic_id, count=count)
+        return _cart(await self._call("remove_product", picnic_id, count=count))
 
     async def clear_cart(self) -> dict[str, Any]:
-        return await self._call("clear_cart")
+        return _cart(await self._call("clear_cart"))
 
     async def get_categories(self, depth: int = 0) -> list[dict[str, Any]]:
         return await self._call("get_categories", depth=depth)
 
     async def get_article(self, article_id: str) -> dict[str, Any]:
-        return await self._call("get_article", article_id)
+        return _article_dict(await self._call("get_article", article_id))
 
     async def get_product_page(self, picnic_id: str) -> dict[str, Any]:
         """Fetch the raw product-details PML page.
@@ -264,7 +320,7 @@ class PicnicClient:
     # get_checkout_status; orchestrated by app.services.picnic.checkout.place_order.
 
     async def get_delivery_slots(self) -> dict[str, Any]:
-        return await self._call("get_delivery_slots")
+        return _raw(await self._call("get_delivery_slots"))
 
     async def set_delivery_slot(self, slot_id: str) -> dict[str, Any]:
         return await self._call("_post", "/cart/set_delivery_slot", {"slot_id": slot_id})

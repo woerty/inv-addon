@@ -11,6 +11,8 @@ RUN npm run build
 # version that exports Picnic2FARequired / Picnic2FAError. Earlier versions
 # have no 2FA handling at all — the library just POSTs credentials and fails
 # silently on 2FA challenges, breaking our web login flow.
+# 2.x returns typed models instead of dicts; app/services/picnic/client.py
+# unwraps them to the raw payloads, so a new major version needs a re-check.
 FROM python:3.13-slim
 
 # Install PostgreSQL 16 + Supervisor
@@ -40,7 +42,7 @@ RUN pip install --no-cache-dir \
     "anthropic>=0.43.0" \
     "openai>=1.60.0" \
     "python-multipart>=0.0.18" \
-    "python-picnic-api2>=1.3.3" \
+    "python-picnic-api2>=2.0.1,<3" \
     "rapidfuzz>=3.10.0" \
     "reportlab>=4.2.0"
 

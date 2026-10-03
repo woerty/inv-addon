@@ -2,12 +2,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.database import Base, engine
 from app.routers import inventory, storage, assistant, persons, picnic, tracked_products, dashboard
+from app.services.picnic.client import PicnicAPIError
 
 
 @asynccontextmanager
@@ -22,7 +23,6 @@ async def lifespan(app: FastAPI):
             Person,
             PicnicProduct,
             PicnicDeliveryImport,
-            ShoppingListItem,
             TrackedProduct,
         )
         async with engine.begin() as conn:
@@ -31,6 +31,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Recipe Assistant API", version="2.0.0", lifespan=lifespan)
+
+
+@app.exception_handler(PicnicAPIError)
+async def picnic_api_error(_: Request, exc: PicnicAPIError) -> JSONResponse:
+    # Surfaced via "error" so the frontend's request() shows the text as-is.
+    return JSONResponse(
+        status_code=502,
+        content={"detail": {"error": f"Picnic hat die Anfrage abgelehnt: {exc.message or exc.code}"}},
+    )
+
 
 app.include_router(inventory.router, prefix="/api/inventory", tags=["inventory"])
 app.include_router(storage.router, prefix="/api/storage-locations", tags=["storage"])
