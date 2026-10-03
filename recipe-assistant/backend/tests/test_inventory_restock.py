@@ -259,3 +259,37 @@ async def test_scan_out_to_zero_keeps_a_row_tracked_under_another_ean(client: As
     assert response.json()["deleted"] is False
     row = await _inventory_row("pack-ean")
     assert row is not None and row.quantity == 0
+
+
+@pytest.mark.asyncio
+async def test_backup_import_does_no_live_picnic_lookups(client: AsyncClient, monkeypatch):
+    """One GTIN lookup per imported row was exactly the burst that got the
+    Picnic account blocked; linking is left to the throttled reconcile."""
+    import json
+
+    from tests.fixtures.picnic.fake_client import FakePicnicClient
+
+    fake = FakePicnicClient()
+    monkeypatch.setattr("app.routers.inventory.get_picnic_client", lambda: fake)
+    async with TestingSessionLocal() as session:
+        session.add(
+            TrackedProduct(
+                barcode="picnic:s100", picnic_id="s100", name="Milch",
+                min_quantity=2, target_quantity=3,
+            )
+        )
+        await session.commit()
+    backup = {
+        "inventory": [
+            {"barcode": f"40000000000{i:02d}", "name": f"Artikel {i}", "quantity": 1}
+            for i in range(20)
+        ]
+    }
+
+    response = await client.post(
+        "/api/inventory/import",
+        files={"file": ("backup.json", json.dumps(backup), "application/json")},
+    )
+
+    assert response.status_code == 200
+    assert fake.gtin_calls == []

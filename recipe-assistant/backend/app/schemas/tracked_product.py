@@ -62,6 +62,9 @@ class ReconcileResponse(BaseModel):
     resolved: int
     added: list[ReconcileAdded]
     failed: list[str]
+    #: Rules left alone because a row that looks like their product isn't
+    #: linked to Picnic yet; a later run picks them up.
+    skipped: list[str]
 
 
 class ResolvePreviewRequest(BaseModel):

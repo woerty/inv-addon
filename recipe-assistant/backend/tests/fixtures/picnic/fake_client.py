@@ -58,6 +58,11 @@ class FakePicnicClient:
         self.gtin_calls.append(ean)
         return self.gtin_lookup.get(ean)
 
+    async def gtin_picnic_id(self, ean: str) -> str | None:
+        self.gtin_calls.append(ean)
+        hit = self.gtin_lookup.get(ean)
+        return hit["id"] if hit else None
+
     async def get_deliveries(self) -> list[dict[str, Any]]:
         return self.deliveries_summary
 

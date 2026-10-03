@@ -32,25 +32,30 @@ async def run_reconcile_once(
     session_factory: Callable[[], AsyncSession] = async_session,
     client_factory: Callable[[], PicnicClientProtocol] = get_picnic_client,
 ) -> ReconcileSummary | None:
-    """One reconcile in its own session. Never raises: a failed run is logged
-    and the next one retries. EAN links resolved before a failure are kept."""
+    """One reconcile in its own session. Never raises: a failed run is rolled
+    back and logged, the next one retries. EAN links survive a failure:
+    reconcile_all commits each one as it goes."""
     async with session_factory() as db:
         try:
             summary = await reconcile_all(db, client_factory())
+            await db.commit()
+            return summary
         except (PicnicNotConfigured, PicnicReauthRequired) as e:
             log.warning("Scheduled reconcile skipped: %s", type(e).__name__)
-            await db.commit()
-            return None
         except Exception:
             log.exception("Scheduled reconcile failed")
-            await db.commit()
-            return None
-        await db.commit()
-        return summary
+        try:
+            await db.rollback()
+        except Exception:
+            log.exception("Rollback after failed reconcile failed")
+        return None
 
 
 async def reconcile_forever() -> None:
     await asyncio.sleep(STARTUP_DELAY_S)
     while True:
-        await run_reconcile_once()
+        try:
+            await run_reconcile_once()
+        except Exception:  # never let the loop die until the next restart
+            log.exception("Scheduled reconcile crashed")
         await asyncio.sleep(INTERVAL_S)

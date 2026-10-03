@@ -390,3 +390,120 @@ async def test_catalog_known_eans_do_not_count_against_the_limit(db: AsyncSessio
     assert client.gtin_calls == ["8000270013122"]
     assert summary.resolved == 2
 
+
+
+# ── Review fixes ──────────────────────────────────────────────────────────
+
+
+def _seed_delivered(client: FakePicnicClient, picnic_id: str, qty: int, *, hours_ago: float) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    start = (datetime.now(UTC) - timedelta(hours=hours_ago)).isoformat()
+    _seed_pending_delivery(client, picnic_id, qty)
+    client.deliveries_summary[0]["status"] = "COMPLETED"
+    client.deliveries_summary[0]["delivery_time"] = {"start": start, "end": start}
+
+
+async def test_just_delivered_goods_count_as_incoming(db: AsyncSession):
+    """Delivered but not scanned in yet: the reconcile must not reorder it."""
+    await _seed_tracked(db, barcode="b1", picnic_id="s100", min_quantity=2, target_quantity=5)
+    client = FakePicnicClient()
+    _seed_delivered(client, "s100", 5, hours_ago=2)
+
+    summary = await reconcile_all(db, client, lookup_delay_s=0)
+
+    assert summary.added == []
+    assert client.added_products == []
+
+
+async def test_delivery_older_than_a_day_is_not_incoming(db: AsyncSession):
+    await _seed_tracked(db, barcode="b1", picnic_id="s100", min_quantity=2, target_quantity=5)
+    client = FakePicnicClient()
+    _seed_delivered(client, "s100", 5, hours_ago=30)
+
+    await reconcile_all(db, client, lookup_delay_s=0)
+
+    assert client.added_products == [("s100", 5)]
+
+
+async def test_imported_delivery_is_not_incoming_any_more(db: AsyncSession):
+    from app.models.picnic import PicnicDeliveryImport
+
+    await _seed_tracked(db, barcode="b1", picnic_id="s100", min_quantity=2, target_quantity=5)
+    db.add(PicnicDeliveryImport(delivery_id="del-pending-1", item_count=1))
+    await db.flush()
+    client = FakePicnicClient()
+    _seed_delivered(client, "s100", 5, hours_ago=2)
+
+    await reconcile_all(db, client, lookup_delay_s=0)
+
+    assert client.added_products == [("s100", 5)]
+
+
+async def test_unreadable_delivery_detail_skips(db: AsyncSession):
+    """An open delivery we can't read might already carry the product."""
+    await _seed_tracked(db, barcode="b1", picnic_id="s100", min_quantity=2, target_quantity=5)
+    client = FakePicnicClient()
+    _seed_pending_delivery(client, "s100", 5)
+    client.delivery_details = {}  # get_delivery -> KeyError
+
+    assert await check_and_enqueue(db, barcode="b1", new_quantity=0, picnic_client=client) is None
+    assert client.added_products == []
+
+
+async def test_decrement_never_looks_up_live(db: AsyncSession):
+    """Request paths only use stored links (a bulk import would burst)."""
+    await _seed_tracked(db, barcode="picnic:s100", picnic_id="s100")
+    client = FakePicnicClient()
+
+    result = await check_and_enqueue(db, barcode="4014400900057", new_quantity=0, picnic_client=client)
+
+    assert result is None
+    assert client.gtin_calls == []
+
+
+async def test_reconcile_stops_lookups_after_the_first_failure(db: AsyncSession):
+    await _seed_tracked(db, barcode="b9", picnic_id="s900", name="Nudeln", min_quantity=0, target_quantity=1)
+    db.add_all([
+        InventoryItem(barcode="1111111111111", name="Kaffee", quantity=1),
+        InventoryItem(barcode="2222222222222", name="Tee", quantity=1),
+    ])
+    await db.flush()
+
+    class Throttled(FakePicnicClient):
+        async def gtin_picnic_id(self, ean):
+            self.gtin_calls.append(ean)
+            raise RuntimeError("HTTP_429")
+
+    client = Throttled()
+    summary = await reconcile_all(db, client, lookup_delay_s=0)
+
+    assert len(client.gtin_calls) == 1
+    assert summary.resolved == 0
+    assert await db.get(PicnicEanLink, "1111111111111") is None
+    assert await db.get(PicnicEanLink, "2222222222222") is None
+
+
+async def test_reconcile_skips_a_rule_whose_lookalike_is_unlinked(db: AsyncSession):
+    """'Vollmilch' is probably the rule's product; until it's linked the
+    rule's stock is unknown, so don't top it up."""
+    await _seed_tracked(db, barcode="picnic:s100", picnic_id="s100", name="Ja! Vollmilch 1 L")
+    db.add(InventoryItem(barcode="4014400900057", name="Vollmilch", quantity=4))
+    await db.flush()
+    client = FakePicnicClient()
+
+    summary = await reconcile_all(db, client, lookup_limit=0, lookup_delay_s=0)
+
+    assert summary.skipped == ["Ja! Vollmilch 1 L"]
+    assert client.added_products == []
+
+
+async def test_reconcile_without_rules_spends_no_lookups(db: AsyncSession):
+    db.add(InventoryItem(barcode="4014400900057", name="Milch", quantity=1))
+    await db.flush()
+    client = FakePicnicClient()
+
+    summary = await reconcile_all(db, client, lookup_delay_s=0)
+
+    assert summary.checked == 0
+    assert client.gtin_calls == []

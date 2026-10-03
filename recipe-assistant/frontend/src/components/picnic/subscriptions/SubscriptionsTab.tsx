@@ -12,9 +12,11 @@ import type { TrackedProduct, TrackedProductCreate, TrackedProductUpdate } from 
 
 interface SubscriptionsTabProps {
   orderQuantities: Record<string, number>;
+  /** Called after "Jetzt prüfen" so the cart and order views catch up. */
+  onReconciled?: () => void;
 }
 
-export default function SubscriptionsTab({ orderQuantities }: SubscriptionsTabProps) {
+export default function SubscriptionsTab({ orderQuantities, onReconciled }: SubscriptionsTabProps) {
   const { items, loading, create, update, remove, promote, refetch } = useTrackedProducts();
   const { notify } = useNotification();
   const [formOpen, setFormOpen] = useState(false);
@@ -27,15 +29,17 @@ export default function SubscriptionsTab({ orderQuantities }: SubscriptionsTabPr
     setChecking(true);
     try {
       const result = await reconcileTrackedProducts();
-      if (result.failed.length > 0) {
-        notify(`Picnic hat abgelehnt: ${result.failed.join(", ")}`, "error");
-      } else if (result.added.length > 0) {
-        const added = result.added.map((a) => `${a.quantity}× ${a.name}`).join(", ");
-        notify(`In den Warenkorb gelegt: ${added}`, "success");
-      } else {
-        notify("Alles aufgefüllt, nichts nachzulegen", "info");
-      }
+      const parts = [
+        result.added.length > 0 &&
+          `In den Warenkorb gelegt: ${result.added.map((a) => `${a.quantity}× ${a.name}`).join(", ")}`,
+        result.failed.length > 0 && `Picnic hat abgelehnt: ${result.failed.join(", ")}`,
+        result.skipped.length > 0 &&
+          `Noch nicht zugeordnet, später erneut: ${result.skipped.join(", ")}`,
+      ].filter(Boolean);
+      const severity = result.failed.length > 0 ? "error" : result.added.length > 0 ? "success" : "info";
+      notify(parts.length > 0 ? parts.join(" · ") : "Alles aufgefüllt, nichts nachzulegen", severity);
       refetch();
+      onReconciled?.();
     } catch (e) {
       notify(e instanceof Error ? e.message : "Prüfung fehlgeschlagen", "error");
     } finally {

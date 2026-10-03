@@ -256,6 +256,8 @@ export interface ReconcileResult {
   resolved: number;
   added: { name: string; quantity: number }[];
   failed: string[];
+  /** Rules left alone: a row that looks like the product isn't linked yet. */
+  skipped: string[];
 }
 
 export interface TrackedProductCreate {

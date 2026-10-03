@@ -128,3 +128,116 @@ async def test_error_payload_on_cart_write_raises():
 def test_library_auth_error_counts_as_auth_error():
     assert _is_auth_error(PicnicAuthError("Picnic authentication error"))
     assert not _is_auth_error(ValueError("boom"))
+
+
+async def test_article_keeps_the_1x_name_and_adds_parsed_fields():
+    from python_picnic_api2 import Article
+
+    class Library(FakeLibrary):
+        def get_article(self, article_id, add_category=False):
+            return Article(
+                id=article_id, name="Gut&Günstig Schlagsahne", unit_quantity="200 ml",
+                image_id="img1", description="Sahne",
+            )
+
+    article = await _client(Library()).get_article("s1028032")
+
+    assert article == {
+        "id": "s1028032", "name": "Gut&Günstig Schlagsahne",
+        "unit_quantity": "200 ml", "image_id": "img1", "description": "Sahne",
+    }
+
+
+async def test_unparseable_article_stays_none():
+    class Library(FakeLibrary):
+        def get_article(self, article_id, add_category=False):
+            return None
+
+    assert await _client(Library()).get_article("s1") is None
+
+
+class _Response:
+    def __init__(self, status: int, location: str | None = None) -> None:
+        self.status_code = status
+        self.headers = {"Location": location} if location else {}
+
+
+class _Session:
+    """Replays Picnic's GTIN redirect chain as observed live."""
+
+    def __init__(self, *responses: _Response) -> None:
+        self.responses = list(responses)
+        self.urls: list[str] = []
+
+    def get(self, url, **kwargs):
+        self.urls.append(url)
+        return self.responses.pop(0)
+
+
+def _gtin_client(*responses: _Response) -> tuple[PicnicClient, _Session]:
+    library = FakeLibrary()
+    library.session = _Session(*responses)
+    return _client(library), library.session
+
+
+async def test_gtin_lookup_reads_the_id_from_the_resolver_redirect():
+    client, session = _gtin_client(
+        _Response(301, "https://gtin-resolver-prod.de.picnicinternational.com/qr/gtin/4311501490426"),
+        _Response(302, "https://picnic.app/link/store/storefront/product-detail;id=s1028032"),
+    )
+
+    assert await client.gtin_picnic_id("4311501490426") == "s1028032"
+    assert len(session.urls) == 2  # no product page fetch
+
+
+async def test_gtin_lookup_unknown_ean_is_a_miss():
+    client, _ = _gtin_client(
+        _Response(301, "https://gtin-resolver-prod.de.picnicinternational.com/qr/gtin/4337256386500"),
+        _Response(302, "https://picnic.app/link/store/storefront"),
+    )
+
+    assert await client.gtin_picnic_id("4337256386500") is None
+
+
+async def test_gtin_lookup_throttled_raises_instead_of_missing():
+    client, _ = _gtin_client(_Response(429))
+
+    with pytest.raises(PicnicAPIError, match="HTTP_429"):
+        await client.gtin_picnic_id("4311501490426")
+
+
+async def test_after_a_2fa_wall_calls_stop_logging_in(monkeypatch, tmp_path):
+    """A dead token on a 2FA account: re-login once, then stop -- every call
+    used to try the password login again."""
+    import python_picnic_api2
+
+    from app.config import get_settings
+    from app.services.picnic.client import PicnicReauthRequired
+
+    monkeypatch.setenv("PICNIC_MAIL", "test@example.com")
+    monkeypatch.setenv("PICNIC_PASSWORD", "secret")
+    monkeypatch.setenv("PICNIC_TOKEN_PATH", str(tmp_path / "token.json"))
+    get_settings.cache_clear()
+    logins = []
+
+    class TwoFactorWall:
+        def __init__(self, **kwargs):
+            pass
+
+        def login(self, username, password):
+            logins.append(username)
+            raise python_picnic_api2.Picnic2FARequired("2FA")
+
+    monkeypatch.setattr(python_picnic_api2, "PicnicAPI", TwoFactorWall)
+
+    class DeadToken(FakeLibrary):
+        def get_cart(self):
+            raise PicnicAuthError("Picnic authentication error")
+
+    client = _client(DeadToken())
+
+    with pytest.raises(PicnicReauthRequired):
+        await client.get_cart()
+    with pytest.raises(PicnicReauthRequired):
+        await client.get_cart()
+    assert logins == ["test@example.com"]

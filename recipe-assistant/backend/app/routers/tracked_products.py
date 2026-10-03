@@ -43,7 +43,7 @@ from app.services.picnic.client import (
     get_picnic_client,
 )
 from app.services.picnic.ean_links import linked_barcodes, linked_quantity
-from app.services.restock import check_and_enqueue, reconcile_all
+from app.services.restock import check_and_enqueue, reconcile_all, reconcile_lock
 from app.services.tracked_products import is_synthetic_barcode, make_synthetic_barcode
 
 router = APIRouter()
@@ -268,6 +268,11 @@ async def reconcile(
 ):
     """Re-check every rule now (the same run the scheduler does every few hours)."""
     _require_enabled()
+    if reconcile_lock.locked():
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "Abgleich läuft gerade schon, gleich nochmal versuchen"},
+        )
     try:
         # Few live GTIN lookups so the request stays quick; the scheduled
         # run links the rest of the inventory.
@@ -282,7 +287,7 @@ async def reconcile(
         log.exception("reconcile failed")
         raise HTTPException(
             status_code=502,
-            detail={"error": "Warenkorb oder Bestellungen bei Picnic nicht lesbar"},
+            detail={"error": "Abgleich fehlgeschlagen, Details im Add-on-Log"},
         )
     await db.commit()
     return ReconcileResponse(
@@ -290,6 +295,7 @@ async def reconcile(
         resolved=summary.resolved,
         added=[ReconcileAdded(name=name, quantity=qty) for name, qty in summary.added],
         failed=summary.failed,
+        skipped=summary.skipped,
     )
 
 

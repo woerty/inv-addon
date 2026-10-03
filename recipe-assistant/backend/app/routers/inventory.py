@@ -84,7 +84,7 @@ async def _apply_decrement(
     Returns True if the inventory row was deleted, False if it was kept.
     Caller must still commit the transaction.
     """
-    tracked = await rule_for_barcode(db, picnic_client, item.barcode)
+    tracked = await rule_for_barcode(db, item.barcode)
 
     if new_quantity <= 0 and tracked is None and not is_custom_barcode(item.barcode):
         await _log_action(db, item.barcode, action, log_details)

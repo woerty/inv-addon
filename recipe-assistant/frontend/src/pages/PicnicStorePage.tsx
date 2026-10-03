@@ -85,7 +85,7 @@ export default function PicnicStorePage() {
       {tab === 1 && <OffersTab onProductClick={setDetailId} />}
       {tab === 2 && <CartTab cart={cart} loading={cartLoading} onAdd={handleCartAdd} onRemove={handleCartRemove} onClear={handleCartClear} onProductClick={setDetailId} onOrderPlaced={handleOrderPlaced} />}
       {tab === 3 && <OrdersTab orders={orders} loading={ordersLoading} />}
-      {tab === 4 && <SubscriptionsTab orderQuantities={orderQuantities} />}
+      {tab === 4 && <SubscriptionsTab orderQuantities={orderQuantities} onReconciled={refreshPicnic} />}
 
       <ProductDetailModal
         picnicId={detailId}

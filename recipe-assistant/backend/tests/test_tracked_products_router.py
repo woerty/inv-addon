@@ -292,3 +292,13 @@ async def test_read_model_counts_every_ean_of_the_product(client: AsyncClient):
     assert listing[0]["current_quantity"] == 3
     assert listing[0]["below_threshold"] is False
     assert listing[0]["inventory_barcodes"] == ["4014400900057"]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_while_one_is_running_is_refused(client: AsyncClient):
+    from app.services.restock import reconcile_lock
+
+    async with reconcile_lock:
+        response = await client.post("/api/tracked-products/reconcile")
+
+    assert response.status_code == 409

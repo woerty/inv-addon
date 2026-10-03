@@ -501,7 +501,8 @@ async def get_product_detail(
     from app.models.tracked_product import TrackedProduct
 
     try:
-        article = await client.get_article(picnic_id)
+        # None when Picnic's page layout isn't parseable
+        article = await client.get_article(picnic_id) or {}
     except Exception:
         article = {}
 
