@@ -4,6 +4,7 @@ from app.models.log import InventoryLog
 from app.models.person import Person
 from app.models.picnic import (
     PicnicDeliveryImport,
+    PicnicEanLink,
     PicnicProduct,
 )
 from app.models.tracked_product import TrackedProduct
@@ -16,5 +17,6 @@ __all__ = [
     "Person",
     "PicnicProduct",
     "PicnicDeliveryImport",
+    "PicnicEanLink",
     "TrackedProduct",
 ]

@@ -41,10 +41,27 @@ class TrackedProductRead(BaseModel):
     picnic_unit_quantity: str | None = None
     min_quantity: int
     target_quantity: int
+    #: Stock across every inventory row of the Picnic product, not just
+    #: the row of `barcode` (see inventory_barcodes).
     current_quantity: int
     below_threshold: bool
     created_at: datetime
     updated_at: datetime
+    #: Inventory barcodes counted towards this rule: its own barcode plus
+    #: every other EAN that Picnic maps to the same product.
+    inventory_barcodes: list[str] = []
+
+
+class ReconcileAdded(BaseModel):
+    name: str
+    quantity: int
+
+
+class ReconcileResponse(BaseModel):
+    checked: int
+    resolved: int
+    added: list[ReconcileAdded]
+    failed: list[str]
 
 
 class ResolvePreviewRequest(BaseModel):

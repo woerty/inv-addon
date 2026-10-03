@@ -74,7 +74,7 @@ docker build -t recipe-assistant .
 ### Frontend (`recipe-assistant/frontend/src/`)
 
 - **React 19 + TypeScript + Vite** with Material-UI
-- **Pages** (`pages/`): Route-based pages. Key: `InventoryPage`, `ScanPage`, `ScanStationPage` (iPad kiosk mode), `TrackedProductsPage`, `ShoppingListPage`
+- **Pages** (`pages/`): Route-based pages. Key: `InventoryPage` (start page at `/`), `DashboardPage` (`/dashboard`), `ScanPage`, `PicnicStorePage` (store, cart, orders, restock rules under "Abos"). `ScanStationPage` (iPad kiosk) is disabled: no route, no nav entry
 - **Hooks** (`hooks/`): Custom hooks for API state management (`useInventory`, `usePicnic`, `useTrackedProducts`, etc.)
 - **API client** (`api/client.ts`): Centralized fetch wrapper for all backend endpoints
 - Uses relative base path (`./`) for Home Assistant Ingress compatibility
@@ -101,6 +101,7 @@ Single Docker container running supervisord with PostgreSQL 16 + uvicorn on port
 
 - All database access is async (`AsyncSession`, async router handlers)
 - Dependency injection via FastAPI `Depends()` for DB sessions and settings
-- Picnic integration uses `python-picnic-api2>=1.3.3` (required for 2FA support)
+- Picnic integration uses `python-picnic-api2` 2.x. It returns pydantic models; `app/services/picnic/client.py` unwraps them to the raw API dicts (`.raw`) that the rest of the code parses, and raises `PicnicAPIError` on Picnic error payloads (the library passes those through as normal responses). Check a new major version against live data before raising the cap
+- Auto-restock (`app/services/restock.py`) matches rules to inventory through the Picnic product, not a single barcode: `picnic_ean_links` maps every scanned EAN to its picnic_id (`app/services/picnic/ean_links.py`). Besides the per-decrement check, `reconcile_all` re-checks every rule 60 s after startup, every 4 h, and via `POST /api/tracked-products/reconcile`. GTIN lookups are throttled per run: a burst of a few hundred got the Picnic account briefly blocked
 - Frontend npm install requires `--legacy-peer-deps` flag (see Dockerfile)
 - Product matching uses `rapidfuzz` for fuzzy string matching

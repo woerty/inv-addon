@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -9,6 +10,7 @@ from app.config import get_settings
 from app.database import Base, engine
 from app.routers import inventory, storage, assistant, persons, picnic, tracked_products, dashboard
 from app.services.picnic.client import PicnicAPIError
+from app.services.restock_schedule import reconcile_forever
 
 
 @asynccontextmanager
@@ -23,11 +25,21 @@ async def lifespan(app: FastAPI):
             Person,
             PicnicProduct,
             PicnicDeliveryImport,
+            PicnicEanLink,
             TrackedProduct,
         )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+    settings = get_settings()
+    restock_task = None
+    if settings.picnic_email and settings.picnic_password:
+        restock_task = asyncio.create_task(reconcile_forever())
     yield
+    if restock_task is not None:
+        restock_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await restock_task
 
 
 app = FastAPI(title="Recipe Assistant API", version="2.0.0", lifespan=lifespan)

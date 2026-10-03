@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Box, Button, CircularProgress, Typography } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
+import PlaylistAddCheckIcon from "@mui/icons-material/PlaylistAddCheck";
+import { reconcileTrackedProducts } from "../../../api/client";
 import { useTrackedProducts } from "../../../hooks/useTrackedProducts";
 import { useNotification } from "../../NotificationProvider";
 import SubscriptionCard from "./SubscriptionCard";
@@ -18,6 +20,28 @@ export default function SubscriptionsTab({ orderQuantities }: SubscriptionsTabPr
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<TrackedProduct | null>(null);
   const [promoteTarget, setPromoteTarget] = useState<TrackedProduct | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  // Runs the same check the backend does every few hours.
+  const handleCheckNow = async () => {
+    setChecking(true);
+    try {
+      const result = await reconcileTrackedProducts();
+      if (result.failed.length > 0) {
+        notify(`Picnic hat abgelehnt: ${result.failed.join(", ")}`, "error");
+      } else if (result.added.length > 0) {
+        const added = result.added.map((a) => `${a.quantity}× ${a.name}`).join(", ");
+        notify(`In den Warenkorb gelegt: ${added}`, "success");
+      } else {
+        notify("Alles aufgefüllt, nichts nachzulegen", "info");
+      }
+      refetch();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Prüfung fehlgeschlagen", "error");
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const handleCreate = async (data: TrackedProductCreate) => {
     await create(data);
@@ -48,9 +72,20 @@ export default function SubscriptionsTab({ orderQuantities }: SubscriptionsTabPr
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
         <Typography variant="h6">Abos ({items.length})</Typography>
-        <Button startIcon={<AddIcon />} variant="contained" size="small" onClick={() => setFormOpen(true)}>
-          Neues Abo
-        </Button>
+        <Box display="flex" gap={1}>
+          <Button
+            startIcon={checking ? <CircularProgress size={16} /> : <PlaylistAddCheckIcon />}
+            variant="outlined"
+            size="small"
+            onClick={handleCheckNow}
+            disabled={checking || items.length === 0}
+          >
+            Jetzt prüfen
+          </Button>
+          <Button startIcon={<AddIcon />} variant="contained" size="small" onClick={() => setFormOpen(true)}>
+            Neues Abo
+          </Button>
+        </Box>
       </Box>
       {items.length === 0 ? (
         <Typography color="text.secondary" textAlign="center" py={4}>

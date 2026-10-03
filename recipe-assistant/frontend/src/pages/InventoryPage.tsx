@@ -62,10 +62,11 @@ const InventoryPage = () => {
   const navigate = useNavigate();
 
   const trackedProducts = useTrackedProducts();
+  // A rule covers every EAN of its Picnic product, not just its own barcode.
   const trackedByBarcode = useMemo(() => {
     const map = new Map<string, TrackedProduct>();
     for (const tp of trackedProducts.items) {
-      map.set(tp.barcode, tp);
+      for (const barcode of [tp.barcode, ...tp.inventory_barcodes]) map.set(barcode, tp);
     }
     return map;
   }, [trackedProducts.items]);
@@ -76,7 +77,7 @@ const InventoryPage = () => {
     for (const tp of trackedProducts.items) {
       const qty = orderQuantities[tp.picnic_id];
       if (tp.picnic_id && qty) {
-        map[tp.barcode] = qty;
+        for (const barcode of [tp.barcode, ...tp.inventory_barcodes]) map[barcode] = qty;
       }
     }
     return map;

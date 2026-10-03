@@ -16,7 +16,6 @@ from app.models.inventory import InventoryItem, StorageLocation
 from app.models.log import InventoryLog
 from app.models.person import Person
 from app.models.picnic import PicnicProduct
-from app.models.tracked_product import TrackedProduct
 from app.schemas.inventory import (
     BarcodeAddRequest,
     BarcodeRemoveRequest,
@@ -31,6 +30,7 @@ from app.services.barcode_sheet import render_barcode_sheet
 from app.services.custom_products import is_custom_barcode, make_custom_barcode
 from app.services.picnic.catalog import PicnicProductData, upsert_product
 from app.services.picnic.client import PicnicClientProtocol, get_picnic_client
+from app.services.picnic.ean_links import rule_for_barcode
 from app.services.restock import check_and_enqueue
 
 router = APIRouter()
@@ -73,8 +73,9 @@ async def _apply_decrement(
     """Apply a quantity decrement plus tracking-aware rules.
 
     - Sets item.quantity = new_quantity.
-    - If new_quantity == 0 and the product has a TrackedProduct rule,
-      the row is kept (zombie); otherwise it is deleted.
+    - If new_quantity == 0 and the product has a TrackedProduct rule (on
+      this barcode or on another EAN of the same Picnic product), the row
+      is kept (zombie); otherwise it is deleted.
     - Runs restock.check_and_enqueue when the row is kept (adds directly
       to the Picnic cart if picnic_client is provided); skipped on the
       delete branch because there is no tracked rule to check against.
@@ -83,11 +84,7 @@ async def _apply_decrement(
     Returns True if the inventory row was deleted, False if it was kept.
     Caller must still commit the transaction.
     """
-    tracked = (
-        await db.execute(
-            select(TrackedProduct).where(TrackedProduct.barcode == item.barcode)
-        )
-    ).scalar_one_or_none()
+    tracked = await rule_for_barcode(db, picnic_client, item.barcode)
 
     if new_quantity <= 0 and tracked is None and not is_custom_barcode(item.barcode):
         await _log_action(db, item.barcode, action, log_details)

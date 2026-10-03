@@ -242,10 +242,20 @@ export interface TrackedProduct {
   picnic_unit_quantity: string | null;
   min_quantity: number;
   target_quantity: number;
+  /** Stock across every inventory row of the Picnic product. */
   current_quantity: number;
   below_threshold: boolean;
   created_at: string;
   updated_at: string;
+  /** Inventory barcodes counted towards the rule (all EANs of the product). */
+  inventory_barcodes: string[];
+}
+
+export interface ReconcileResult {
+  checked: number;
+  resolved: number;
+  added: { name: string; quantity: number }[];
+  failed: string[];
 }
 
 export interface TrackedProductCreate {

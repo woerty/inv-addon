@@ -247,3 +247,48 @@ async def test_create_with_real_barcode_still_works(client: AsyncClient):
     data = response.json()
     assert data["barcode"] == "4014400900057"
     assert data["picnic_id"] == "s100"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_endpoint_tops_up_and_reports(
+    client: AsyncClient, override_picnic_client: FakePicnicClient
+):
+    await client.post(
+        "/api/tracked-products",
+        json={"picnic_id": "s200", "name": "Spaghetti", "min_quantity": 1, "target_quantity": 2},
+    )
+    # The create path already topped up; empty the cart to simulate a refused add.
+    override_picnic_client.cart_items.clear()
+    override_picnic_client.added_products.clear()
+
+    response = await client.post("/api/tracked-products/reconcile")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checked"] == 1
+    assert body["added"] == [{"name": "Spaghetti", "quantity": 2}]
+    assert body["failed"] == []
+    assert override_picnic_client.added_products == [("s200", 2)]
+
+
+@pytest.mark.asyncio
+async def test_read_model_counts_every_ean_of_the_product(client: AsyncClient):
+    """A placeholder rule shows the stock scanned under the real EAN."""
+    from app.models.inventory import InventoryItem
+    from app.models.picnic import PicnicEanLink
+
+    await client.post(
+        "/api/tracked-products",
+        json={"picnic_id": "s100", "name": "Milch", "min_quantity": 1, "target_quantity": 2},
+    )
+    async with TestingSessionLocal() as session:
+        session.add(InventoryItem(barcode="4014400900057", name="Milch", quantity=3))
+        session.add(PicnicEanLink(ean="4014400900057", picnic_id="s100"))
+        await session.commit()
+
+    listing = (await client.get("/api/tracked-products")).json()
+
+    assert listing[0]["barcode"] == "picnic:s100"
+    assert listing[0]["current_quantity"] == 3
+    assert listing[0]["below_threshold"] is False
+    assert listing[0]["inventory_barcodes"] == ["4014400900057"]

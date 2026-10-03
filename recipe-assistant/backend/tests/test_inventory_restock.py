@@ -234,3 +234,28 @@ async def test_json_import_below_threshold_triggers_restock(client: AsyncClient,
 
     # needed = 5 - 1 = 4
     assert fake.added_products == [("s100", 4)]
+
+
+@pytest.mark.asyncio
+async def test_scan_out_to_zero_keeps_a_row_tracked_under_another_ean(client: AsyncClient):
+    """The rule sits on one EAN of the product, the row on another: the row
+    must survive at 0 like a directly tracked one ("leer, nachbestellen")."""
+    from app.models.picnic import PicnicEanLink
+
+    async with TestingSessionLocal() as session:
+        session.add(InventoryItem(barcode="pack-ean", name="Sahne", quantity=1))
+        session.add(PicnicEanLink(ean="pack-ean", picnic_id="s100"))
+        session.add(
+            TrackedProduct(
+                barcode="rule-ean", picnic_id="s100", name="Sahne",
+                min_quantity=2, target_quantity=3,
+            )
+        )
+        await session.commit()
+
+    response = await client.post("/api/inventory/scan-out", json={"barcode": "pack-ean"})
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is False
+    row = await _inventory_row("pack-ean")
+    assert row is not None and row.quantity == 0

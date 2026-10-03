@@ -7,6 +7,8 @@ products that resolve to a Picnic SKU via get_article_by_gtin.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +21,8 @@ from app.models.tracked_product import TrackedProduct
 from app.schemas.tracked_product import (
     PromoteBarcodeRequest,
     PromoteBarcodeResponse,
+    ReconcileAdded,
+    ReconcileResponse,
     ResolvePreviewRequest,
     ResolvePreviewResponse,
     TrackedProductCreate,
@@ -32,15 +36,18 @@ from app.services.picnic.catalog import (
     upsert_product,
 )
 from app.services.picnic.client import (
+    PicnicAPIError,
     PicnicClientProtocol,
     PicnicNotConfigured,
     PicnicReauthRequired,
     get_picnic_client,
 )
-from app.services.restock import check_and_enqueue
+from app.services.picnic.ean_links import linked_barcodes, linked_quantity
+from app.services.restock import check_and_enqueue, reconcile_all
 from app.services.tracked_products import is_synthetic_barcode, make_synthetic_barcode
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 def _feature_enabled() -> bool:
@@ -97,22 +104,13 @@ async def _current_inventory_quantity(db: AsyncSession, barcode: str) -> int:
     return row.quantity if row is not None else 0
 
 
-async def _build_read_model(
-    db: AsyncSession,
-    tp: TrackedProduct,
-    *,
-    current_quantity: int | None = None,
-) -> TrackedProductRead:
+async def _build_read_model(db: AsyncSession, tp: TrackedProduct) -> TrackedProductRead:
     picnic_row = (
         await db.execute(
             select(PicnicProduct).where(PicnicProduct.picnic_id == tp.picnic_id)
         )
     ).scalar_one_or_none()
-    current_qty = (
-        current_quantity
-        if current_quantity is not None
-        else await _current_inventory_quantity(db, tp.barcode)
-    )
+    current_qty = await linked_quantity(db, tp)
     return TrackedProductRead(
         barcode=tp.barcode,
         picnic_id=tp.picnic_id,
@@ -126,6 +124,7 @@ async def _build_read_model(
         below_threshold=current_qty < tp.min_quantity,
         created_at=tp.created_at,
         updated_at=tp.updated_at,
+        inventory_barcodes=await linked_barcodes(db, tp),
     )
 
 
@@ -257,9 +256,41 @@ async def create_tracked(
         db, barcode=effective_barcode, new_quantity=current_qty, picnic_client=client
     )
 
-    result = await _build_read_model(db, tp, current_quantity=current_qty)
+    result = await _build_read_model(db, tp)
     await db.commit()
     return result
+
+
+@router.post("/reconcile", response_model=ReconcileResponse)
+async def reconcile(
+    client: PicnicClientProtocol = Depends(get_picnic_client),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-check every rule now (the same run the scheduler does every few hours)."""
+    _require_enabled()
+    try:
+        # Few live GTIN lookups so the request stays quick; the scheduled
+        # run links the rest of the inventory.
+        summary = await reconcile_all(db, client, lookup_limit=10, lookup_delay_s=0.3)
+    except PicnicNotConfigured:
+        raise HTTPException(status_code=503, detail={"error": "picnic_not_configured"})
+    except PicnicReauthRequired:
+        raise HTTPException(status_code=503, detail={"error": "picnic_reauth_required"})
+    except PicnicAPIError:
+        raise
+    except Exception:
+        log.exception("reconcile failed")
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "Warenkorb oder Bestellungen bei Picnic nicht lesbar"},
+        )
+    await db.commit()
+    return ReconcileResponse(
+        checked=summary.checked,
+        resolved=summary.resolved,
+        added=[ReconcileAdded(name=name, quantity=qty) for name, qty in summary.added],
+        failed=summary.failed,
+    )
 
 
 @router.patch("/{barcode}", response_model=TrackedProductRead)
@@ -292,6 +323,9 @@ async def update_tracked(
     tp.min_quantity = new_min
     tp.target_quantity = new_target
     await db.flush()
+    # updated_at is set server-side and expired by the flush; load it now,
+    # _build_read_model reads it synchronously.
+    await db.refresh(tp)
 
     # Re-run the threshold check so a raised min_quantity/target_quantity
     # triggers a Picnic cart addition. Lowered thresholds are no-ops by
@@ -301,7 +335,7 @@ async def update_tracked(
         db, barcode=barcode, new_quantity=current_qty, picnic_client=client
     )
 
-    result = await _build_read_model(db, tp, current_quantity=current_qty)
+    result = await _build_read_model(db, tp)
     await db.commit()
     return result
 

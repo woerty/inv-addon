@@ -20,6 +20,7 @@ import type {
   TrackedProduct,
   TrackedProductCreate,
   TrackedProductUpdate,
+  ReconcileResult,
   ResolvePreview,
   PromoteBarcodeResponse,
   DashboardSummary,
@@ -295,6 +296,9 @@ export const deleteTrackedProduct = (barcode: string) =>
     `/tracked-products/${encodeURIComponent(barcode)}`,
     { method: "DELETE" }
   );
+
+export const reconcileTrackedProducts = () =>
+  request<ReconcileResult>("/tracked-products/reconcile", { method: "POST" });
 
 export const resolveTrackedProductPreview = (barcode: string) =>
   request<ResolvePreview>("/tracked-products/resolve-preview", {

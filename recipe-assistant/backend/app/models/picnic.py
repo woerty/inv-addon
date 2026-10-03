@@ -43,3 +43,23 @@ class PicnicDeliveryImport(Base):
     item_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class PicnicEanLink(Base):
+    """Which Picnic product a scanned EAN belongs to, per Picnic's GTIN lookup.
+
+    One Picnic product can carry several EANs -- private labels switch EANs
+    between producers -- so restock matches rules to inventory through
+    picnic_id rather than through a single barcode. PicnicProduct.ean holds
+    only one EAN per product and cannot represent that.
+
+    picnic_id is None when Picnic does not know the EAN; checked_at lets that
+    answer expire so it is asked again later.
+    """
+    __tablename__ = "picnic_ean_links"
+
+    ean: Mapped[str] = mapped_column(String, primary_key=True)
+    picnic_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False,
+        default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        server_default=func.now(),
+    )
