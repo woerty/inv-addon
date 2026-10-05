@@ -55,6 +55,9 @@ Das Add-on **ruft nur hinaus**: Es fragt ass3 per Long-Polling nach Befehlen
 seinen Stand (Inventar, Nachbestell-Regeln, Picnic-Korb und offene
 Bestellungen). Zuhause wird kein Port geöffnet; nichts im Add-on wartet auf
 Anfragen von ass3.
+Zum Stand gehört auch der Verlauf der letzten 48 Stunden (Ein-/Austragen,
+Änderungen, Nachbestellungen, mit Name und Menge vorher/nachher), damit ass3
+z. B. gerade am Scanner Ausgetragenes noch findet.
 
 Ausgeführt werden nur diese fünf Befehle:
 
