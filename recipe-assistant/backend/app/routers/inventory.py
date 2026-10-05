@@ -13,7 +13,6 @@ from sqlalchemy.orm import selectinload
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models.inventory import InventoryItem, StorageLocation
-from app.models.log import InventoryLog
 from app.models.person import Person
 from app.models.picnic import PicnicProduct
 from app.schemas.inventory import (
@@ -28,9 +27,16 @@ from app.schemas.inventory import (
 from app.services.barcode import lookup_barcode
 from app.services.barcode_sheet import render_barcode_sheet
 from app.services.custom_products import is_custom_barcode, make_custom_barcode
-from app.services.picnic.catalog import PicnicProductData, upsert_product
+from app.services.inventory_ops import apply_decrement as _apply_decrement
+from app.services.inventory_ops import log_action as _log_action
+from app.services.inventory_ops import scan_out_one
+from app.services.picnic.catalog import (
+    PicnicProductData,
+    image_urls_by_ean,
+    picnic_image_url,
+    upsert_product,
+)
 from app.services.picnic.client import PicnicClientProtocol, get_picnic_client
-from app.services.picnic.ean_links import rule_for_barcode
 from app.services.restock import check_and_enqueue
 
 router = APIRouter()
@@ -44,10 +50,6 @@ async def _opt_picnic_client() -> PicnicClientProtocol | None:
         return None
 
 
-async def _log_action(db: AsyncSession, barcode: str, action: str, details: str | None = None) -> None:
-    db.add(InventoryLog(barcode=barcode, action=action, details=details))
-
-
 async def _resolve_storage_location(db: AsyncSession, name: str | None) -> int | None:
     if not name:
         return None
@@ -59,48 +61,6 @@ async def _resolve_storage_location(db: AsyncSession, name: str | None) -> int |
     db.add(new_loc)
     await db.flush()
     return new_loc.id
-
-
-async def _apply_decrement(
-    db: AsyncSession,
-    item: InventoryItem,
-    new_quantity: int,
-    *,
-    action: str,
-    log_details: str,
-    picnic_client: PicnicClientProtocol | None = None,
-) -> bool:
-    """Apply a quantity decrement plus tracking-aware rules.
-
-    - Sets item.quantity = new_quantity.
-    - If new_quantity == 0 and the product has a TrackedProduct rule (on
-      this barcode or on another EAN of the same Picnic product), the row
-      is kept (zombie); otherwise it is deleted.
-    - Runs restock.check_and_enqueue when the row is kept (adds directly
-      to the Picnic cart if picnic_client is provided); skipped on the
-      delete branch because there is no tracked rule to check against.
-    - Writes an InventoryLog entry with the given action and details.
-
-    Returns True if the inventory row was deleted, False if it was kept.
-    Caller must still commit the transaction.
-    """
-    tracked = await rule_for_barcode(db, item.barcode)
-
-    if new_quantity <= 0 and tracked is None and not is_custom_barcode(item.barcode):
-        await _log_action(db, item.barcode, action, log_details)
-        await db.delete(item)
-        return True
-
-    item.quantity = new_quantity
-    await _log_action(db, item.barcode, action, log_details)
-    await check_and_enqueue(
-        db,
-        barcode=item.barcode,
-        new_quantity=new_quantity,
-        tracked=tracked,
-        picnic_client=picnic_client,
-    )
-    return False
 
 
 @router.get("/", response_model=list[InventoryItemResponse])
@@ -127,20 +87,7 @@ async def get_inventory(
     items = result.scalars().all()
 
     # Enrich with Picnic product images (highest priority).
-    barcodes = [i.barcode for i in items]
-    picnic_image_map: dict[str, str] = {}
-    if barcodes:
-        pp_rows = (
-            await db.execute(
-                select(PicnicProduct.ean, PicnicProduct.image_id)
-                .where(PicnicProduct.ean.in_(barcodes))
-                .where(PicnicProduct.image_id.isnot(None))
-            )
-        ).all()
-        picnic_image_map = {
-            row.ean: f"https://storefront-prod.de.picnicinternational.com/static/images/{row.image_id}/small.png"
-            for row in pp_rows
-        }
+    picnic_image_map = await image_urls_by_ean(db, [i.barcode for i in items])
 
     # Build final image_url: Picnic CDN > stored image_url from barcode lookup.
     for item in items:
@@ -288,7 +235,7 @@ async def backfill_images(
                         last_price_cents=sr.get("display_price") if sr else None,
                     ))
                     if image_id:
-                        picnic_url = f"https://storefront-prod.de.picnicinternational.com/static/images/{image_id}/small.png"
+                        picnic_url = picnic_image_url(image_id)
                         if item.image_url != picnic_url:
                             item.image_url = picnic_url
                             diag["inv_updated"] += 1
@@ -482,11 +429,8 @@ async def scan_out(
     if auth_fail is not None:
         return auth_fail
 
-    result = await db.execute(
-        select(InventoryItem).where(InventoryItem.barcode == req.barcode)
-    )
-    item = result.scalar_one_or_none()
-    if not item:
+    result = await scan_out_one(db, req.barcode, picnic_client=await _opt_picnic_client())
+    if result is None:
         return JSONResponse(
             status_code=404,
             content={
@@ -495,29 +439,13 @@ async def scan_out(
                 "error": "Kein Artikel mit diesem Barcode im Inventar",
             },
         )
-
-    name = item.name
-    old_qty = item.quantity
-    new_qty = old_qty - 1
-    deleted = await _apply_decrement(
-        db,
-        item,
-        new_qty,
-        action="scan-out",
-        log_details=(
-            f"quantity: {old_qty} → {new_qty}"
-            if new_qty > 0
-            else "removed last item"
-        ),
-        picnic_client=await _opt_picnic_client(),
-    )
     await db.commit()
     return {
         "status": "ok",
         "barcode": req.barcode,
-        "name": name,
-        "remaining_quantity": max(new_qty, 0),
-        "deleted": deleted,
+        "name": result.name,
+        "remaining_quantity": result.remaining_quantity,
+        "deleted": result.deleted,
     }
 
 

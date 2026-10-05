@@ -37,7 +37,23 @@ async def parse_cart_response(
     client: PicnicClientProtocol,
 ) -> CartResponse:
     """Fetch cart from Picnic and return structured response."""
-    raw = await client.get_cart()
+    return cart_from_raw(await client.get_cart())
+
+
+def selected_slot_window(raw: dict) -> tuple[str, str] | None:
+    """(window_start, window_end) of the cart's selected delivery slot, if
+    the cart payload lists it among its delivery_slots."""
+    slot_id = (raw.get("selected_slot") or {}).get("slot_id")
+    if not slot_id:
+        return None
+    for slot in raw.get("delivery_slots") or []:
+        if slot.get("slot_id") == slot_id and slot.get("window_start") and slot.get("window_end"):
+            return slot["window_start"], slot["window_end"]
+    return None
+
+
+def cart_from_raw(raw: dict) -> CartResponse:
+    """Structured cart from a raw Picnic cart payload."""
     items: list[CartItemResponse] = []
     total_price = 0
 

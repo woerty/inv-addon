@@ -45,7 +45,6 @@ from app.schemas.picnic import (
     PicnicLoginVerifyResponse,
     PicnicProductCacheEntry,
     PicnicSearchResponse,
-    PicnicSearchResult,
     PicnicStatusResponse,
     OrderPlacedResult,
     ProductDetailResponse,
@@ -56,7 +55,7 @@ from app.services.picnic.cart import (
     _parse_cart_quantities,
     parse_cart_response,
 )
-from app.services.picnic.catalog import PicnicProductData, get_product, upsert_product
+from app.services.picnic.catalog import get_product, search_products
 from app.services.picnic.checkout import (
     PicnicCheckoutError,
     parse_delivery_slots,
@@ -245,39 +244,7 @@ async def search(
     _require_enabled()
     if len(q.strip()) < 2:
         raise HTTPException(status_code=400, detail={"error": "query_too_short"})
-    raw = await client.search(q)
-    # python-picnic-api2 returns list of groups; flatten items
-    results: list[PicnicSearchResult] = []
-    for group in raw:
-        if len(results) >= MAX_SEARCH_RESULTS:
-            break
-        for item in group.get("items", []):
-            if len(results) >= MAX_SEARCH_RESULTS:
-                break
-            pid = item.get("id")
-            if not pid:
-                continue
-            name = item.get("name", "")
-            await upsert_product(
-                db,
-                PicnicProductData(
-                    picnic_id=pid,
-                    ean=None,
-                    name=name,
-                    unit_quantity=item.get("unit_quantity"),
-                    image_id=item.get("image_id"),
-                    last_price_cents=item.get("display_price"),
-                ),
-            )
-            results.append(
-                PicnicSearchResult(
-                    picnic_id=pid,
-                    name=name,
-                    unit_quantity=item.get("unit_quantity"),
-                    image_id=item.get("image_id"),
-                    price_cents=item.get("display_price"),
-                )
-            )
+    results = await search_products(db, client, q, limit=MAX_SEARCH_RESULTS)
     await db.commit()
     return PicnicSearchResponse(results=results)
 

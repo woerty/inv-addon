@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from datetime import datetime
 
 from app.schemas.picnic import (
     PendingOrder,
@@ -18,6 +19,17 @@ from app.services.picnic.import_flow import (
 log = logging.getLogger(__name__)
 
 _COMPLETED_STATUSES = {"COMPLETED", "CANCELLED"}
+
+
+def _parse_delivery_end(detail: dict) -> datetime | None:
+    """End of the delivery window; same sources as _parse_delivery_time."""
+    end = (detail.get("delivery_time") or {}).get("end") or (detail.get("slot") or {}).get("window_end")
+    if not end:
+        return None
+    try:
+        return datetime.fromisoformat(end)
+    except ValueError:
+        return None
 
 
 async def parse_pending_orders(
@@ -83,6 +95,7 @@ async def parse_pending_orders(
                 delivery_id=delivery_id,
                 status=summary.get("status", "UNKNOWN"),
                 delivery_time=_parse_delivery_time(detail),
+                delivery_time_end=_parse_delivery_end(detail),
                 total_items=sum(i.quantity for i in items),
                 total_price_cents=total_price_cents,
                 items=items,

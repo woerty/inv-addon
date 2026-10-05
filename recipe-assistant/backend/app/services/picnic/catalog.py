@@ -6,6 +6,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.picnic import PicnicProduct
+from app.schemas.picnic import PicnicSearchResult
+from app.services.picnic.client import PicnicClientProtocol
+
+_IMAGE_BASE = "https://storefront-prod.de.picnicinternational.com/static/images"
+
+
+def picnic_image_url(image_id: str) -> str:
+    return f"{_IMAGE_BASE}/{image_id}/small.png"
 
 
 @dataclass(frozen=True)
@@ -76,3 +84,58 @@ async def upsert_product(session: AsyncSession, data: PicnicProductData) -> Picn
     session.add(row)
     await session.flush()
     return row
+
+
+async def image_urls_by_ean(session: AsyncSession, eans: list[str]) -> dict[str, str]:
+    """Picnic CDN image per EAN, for the EANs the catalog has an image for."""
+    if not eans:
+        return {}
+    rows = (
+        await session.execute(
+            select(PicnicProduct.ean, PicnicProduct.image_id)
+            .where(PicnicProduct.ean.in_(eans))
+            .where(PicnicProduct.image_id.isnot(None))
+        )
+    ).all()
+    return {row.ean: picnic_image_url(row.image_id) for row in rows}
+
+
+async def search_products(
+    session: AsyncSession,
+    client: PicnicClientProtocol,
+    query: str,
+    *,
+    limit: int,
+) -> list[PicnicSearchResult]:
+    """Free-text Picnic search, up to `limit` hits; every hit is cached in
+    picnic_products. One Picnic request. The caller commits."""
+    results: list[PicnicSearchResult] = []
+    for group in await client.search(query):
+        for item in group.get("items", []):
+            if len(results) >= limit:
+                return results
+            pid = item.get("id")
+            if not pid:
+                continue
+            name = item.get("name", "")
+            await upsert_product(
+                session,
+                PicnicProductData(
+                    picnic_id=pid,
+                    ean=None,
+                    name=name,
+                    unit_quantity=item.get("unit_quantity"),
+                    image_id=item.get("image_id"),
+                    last_price_cents=item.get("display_price"),
+                ),
+            )
+            results.append(
+                PicnicSearchResult(
+                    picnic_id=pid,
+                    name=name,
+                    unit_quantity=item.get("unit_quantity"),
+                    image_id=item.get("image_id"),
+                    price_cents=item.get("display_price"),
+                )
+            )
+    return results
