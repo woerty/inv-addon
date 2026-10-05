@@ -42,6 +42,38 @@ Falls du Bilder generieren möchtest, kannst du diese Option im Frontend aktivie
 
 ---
 
+## 🔗 Verbindung zu ass3 (optional)
+
+Das Add-on kann seinen Vorrat mit **ass3** (persönliches Agentensystem) teilen.
+Zwei Optionen schalten das ein; sind beide leer, bleibt alles wie bisher:
+
+- **`ass3_url`** – Adresse des ass3-Servers, z. B. `https://bat.r8.wodv.de`
+- **`ass3_token`** – der `INVENTORY_LINK_TOKEN` aus der `.env` von ass3
+
+Das Add-on **ruft nur hinaus**: Es fragt ass3 per Long-Polling nach Befehlen
+(`/api/inventory-link/commands`), schickt die Ergebnisse zurück und meldet
+seinen Stand (Inventar, Nachbestell-Regeln, Picnic-Korb und offene
+Bestellungen). Zuhause wird kein Port geöffnet; nichts im Add-on wartet auf
+Anfragen von ass3.
+
+Ausgeführt werden nur diese fünf Befehle:
+
+| Befehl | Wirkung |
+|---|---|
+| `scan_out` | Artikel 1–20× austragen, genau wie der Scanner (inkl. Nachbestellen) |
+| `cart_add` | Picnic-Artikel 1–20× in den Korb |
+| `cart_remove` | Picnic-Artikel 1–20× aus dem Korb |
+| `picnic_search` | Picnic-Suche, höchstens 8 Treffer |
+| `refresh` | Stand sofort schicken, mit Korb und Bestellungen |
+
+**Bestellen (Checkout) ist absichtlich nicht möglich** – ass3 kann den Korb
+füllen, bestellt wird weiter im Add-on oder in der Picnic-App. Abgelaufene,
+unbekannte oder falsch aufgerufene Befehle werden abgelehnt, jeder Befehl
+steht im Add-on-Log. Picnic wird dabei sparsam gefragt (Korb und
+Bestellungen höchstens alle 30 min bzw. nach einer Korbänderung).
+
+---
+
 ## 📂 Daten & Backup
 
 ### 🔍 **Wo wird die Datenbank gespeichert?**
