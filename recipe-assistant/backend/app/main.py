@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.database import Base, engine
 from app.routers import inventory, storage, assistant, persons, picnic, tracked_products, dashboard
+from app.services.ass3_link import start_ass3_link
 from app.services.picnic.client import PicnicAPIError
 from app.services.restock_schedule import reconcile_forever
 
@@ -35,11 +36,13 @@ async def lifespan(app: FastAPI):
     restock_task = None
     if settings.picnic_email and settings.picnic_password:
         restock_task = asyncio.create_task(reconcile_forever())
+    ass3_task = start_ass3_link(settings)  # None unless ass3_url and ass3_token are set
     yield
-    if restock_task is not None:
-        restock_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await restock_task
+    for task in (restock_task, ass3_task):
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 app = FastAPI(title="Recipe Assistant API", version="2.0.0", lifespan=lifespan)
