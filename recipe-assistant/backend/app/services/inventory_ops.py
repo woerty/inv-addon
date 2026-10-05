@@ -20,8 +20,28 @@ from app.services.picnic.ean_links import rule_for_barcode
 from app.services.restock import check_and_enqueue
 
 
-async def log_action(db: AsyncSession, barcode: str, action: str, details: str | None = None) -> None:
-    db.add(InventoryLog(barcode=barcode, action=action, details=details))
+async def log_action(
+    db: AsyncSession,
+    barcode: str,
+    action: str,
+    details: str | None = None,
+    *,
+    name: str | None = None,
+    before: int | None = None,
+    after: int | None = None,
+) -> None:
+    """Log an inventory event. `before`/`after` are the item's quantity
+    around it, when the event changes it (0 before = new, 0 after = gone)."""
+    db.add(
+        InventoryLog(
+            barcode=barcode,
+            action=action,
+            details=details,
+            name=name,
+            quantity_before=before,
+            quantity_after=after,
+        )
+    )
 
 
 async def apply_decrement(
@@ -51,14 +71,20 @@ async def apply_decrement(
     Caller must still commit the transaction.
     """
     tracked = await rule_for_barcode(db, item.barcode)
+    old_quantity = item.quantity
 
     if new_quantity <= 0 and tracked is None and not is_custom_barcode(item.barcode):
-        await log_action(db, item.barcode, action, log_details)
+        await log_action(
+            db, item.barcode, action, log_details, name=item.name, before=old_quantity, after=0
+        )
         await db.delete(item)
         return True
 
     item.quantity = new_quantity
-    await log_action(db, item.barcode, action, log_details)
+    await log_action(
+        db, item.barcode, action, log_details,
+        name=item.name, before=old_quantity, after=new_quantity,
+    )
     if restock:
         await check_and_enqueue(
             db,

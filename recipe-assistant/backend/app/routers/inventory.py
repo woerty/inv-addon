@@ -135,7 +135,9 @@ async def relookup_barcode(barcode: str, db: AsyncSession = Depends(get_db)):
     item.category = product["category"]
     if product.get("image_url") and not item.image_url:
         item.image_url = product["image_url"]
-    await _log_action(db, barcode, "update", f"re-lookup: {old_name} → {product['name']}")
+    await _log_action(
+        db, barcode, "update", f"re-lookup: {old_name} → {product['name']}", name=item.name
+    )
     await db.commit()
     return {"message": f'Aktualisiert: "{product["name"]}"', "updated": True}
 
@@ -307,7 +309,10 @@ async def create_custom_product(
         storage_location_id=location_id,
     )
     db.add(item)
-    await _log_action(db, barcode, "create-custom", f"name: {req.name}")
+    await _log_action(
+        db, barcode, "create-custom", f"name: {req.name}",
+        name=req.name, before=0, after=req.quantity,
+    )
     await db.commit()
 
     result = await db.execute(
@@ -330,7 +335,10 @@ async def add_item_by_barcode(
 
     if existing:
         existing.quantity += 1
-        await _log_action(db, req.barcode, "add", f"quantity: {existing.quantity - 1} → {existing.quantity}")
+        await _log_action(
+            db, req.barcode, "add", f"quantity: {existing.quantity - 1} → {existing.quantity}",
+            name=existing.name, before=existing.quantity - 1, after=existing.quantity,
+        )
         await db.commit()
         return {"message": f'Produkt "{existing.name}" existierte bereits. Menge um 1 erhöht.'}
 
@@ -353,7 +361,7 @@ async def add_item_by_barcode(
         expiration_date=req.expiration_date,
     )
     db.add(item)
-    await _log_action(db, req.barcode, "add")
+    await _log_action(db, req.barcode, "add", name=item.name, before=0, after=1)
     await db.commit()
     return {"message": f'Artikel "{product["name"]}" hinzugefügt!'}
 
@@ -509,7 +517,10 @@ async def scan_in(
                 "id": existing.storage_location.id,
                 "name": existing.storage_location.name,
             }
-        await _log_action(db, req.barcode, "scan-in", f"qty → {new_qty}")
+        await _log_action(
+            db, req.barcode, "scan-in", f"qty → {new_qty}",
+            name=item_name, before=new_qty - 1, after=new_qty,
+        )
         await db.commit()
         return {
             "status": "ok",
@@ -545,7 +556,7 @@ async def scan_in(
         storage_location_id=requested_location.id if requested_location else None,
     )
     db.add(item)
-    await _log_action(db, req.barcode, "scan-in", "new item")
+    await _log_action(db, req.barcode, "scan-in", "new item", name=item.name, before=0, after=1)
     await db.commit()
 
     loc_response: dict | None = None
@@ -595,7 +606,8 @@ async def update_item(
             # check, no delete rule — simple assignment.
             item.quantity = req.quantity
             await _log_action(
-                db, barcode, "update", f"quantity: {old_qty} → {req.quantity}"
+                db, barcode, "update", f"quantity: {old_qty} → {req.quantity}",
+                name=item.name, before=old_qty, after=req.quantity,
             )
 
     if req.storage_location is not None:
@@ -623,7 +635,7 @@ async def delete_item(
     if not item:
         raise HTTPException(status_code=404, detail=f"Kein Artikel mit Barcode {barcode} gefunden")
 
-    await _log_action(db, barcode, "delete")
+    await _log_action(db, barcode, "delete", name=item.name, before=item.quantity, after=0)
     await db.delete(item)
     # Inventory dropped to zero: if a TrackedProduct rule exists, refill
     # the Picnic cart. Without this the explicit-delete path silently

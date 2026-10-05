@@ -111,11 +111,14 @@ async def _cart_and_incoming(
 def _log_restock(db: AsyncSession, rule: TrackedProduct, current: int, delta: int) -> None:
     # Logged under the rule's barcode: the dashboard prices restocks by
     # joining log.barcode to TrackedProduct.barcode.
+    # quantity_after is the stock at the time; a restock doesn't change it.
     db.add(
         InventoryLog(
             barcode=rule.barcode,
             action="restock_auto",
             details=f"qty→{current}, cart delta={delta}",
+            name=rule.name,
+            quantity_after=current,
         )
     )
 
