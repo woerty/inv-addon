@@ -13,22 +13,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Annotated, Any, TypeVar
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import DateTime, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import Settings
 from app.database import async_session
 from app.models.inventory import InventoryItem
+from app.models.log import InventoryLog
 from app.models.tracked_product import TrackedProduct
 from app.services.inventory_ops import scan_out_one
 from app.services.picnic.cart import cart_from_raw, selected_slot_window
@@ -63,6 +65,8 @@ PICNIC_FETCH_MIN_GAP_S = 60
 PICNIC_COMMANDS_PER_WINDOW = 40
 PICNIC_COMMAND_WINDOW_S = 10 * 60
 SEARCH_LIMIT = 8
+HISTORY_WINDOW = timedelta(hours=48)
+HISTORY_LIMIT = 300
 
 T = TypeVar("T")
 
@@ -128,8 +132,88 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+# Quantity formats the code writes into `details`. Read only for entries
+# without quantity_before/after (written before migration 012).
+_QUANTITY_DETAILS = (
+    (re.compile(r"quantity: (-?\d+) → (-?\d+)"), 1, 2),  # add, remove, scan-out, update, delete
+    (re.compile(r"qty → (-?\d+)"), None, 1),  # scan-in
+    (re.compile(r"qty→(-?\d+), cart delta=\d+"), None, 1),  # restock_auto: stock at the time
+)
+_FIXED_DETAILS = {"removed last item": (None, 0), "new item": (0, 1)}
+
+
+def quantities_from_details(details: str | None) -> tuple[int | None, int | None]:
+    """(before, after) from a log entry's details; None where it doesn't say."""
+    if not details:
+        return None, None
+    if details in _FIXED_DETAILS:
+        return _FIXED_DETAILS[details]
+    for pattern, before, after in _QUANTITY_DETAILS:
+        match = pattern.fullmatch(details)
+        if match:
+            return (int(match.group(before)) if before else None), int(match.group(after))
+    return None, None
+
+
+async def build_history(db: AsyncSession, *, now: datetime | None = None) -> list[dict[str, Any]]:
+    """Inventory log of the last 48 h, newest first, at most 300 entries.
+
+    inventory_log.timestamp is a naive DateTime filled by the database's
+    now(), so which zone it is in depends on the database:
+    - Postgres (the add-on) stores now() into a timestamp-without-time-zone
+      column as local time of the session TimeZone. asyncpg doesn't set one,
+      so it is the server's `timezone` from postgresql.conf, which initdb
+      (run.sh, first start) took from the container's TZ -- the Supervisor
+      sets that to Home Assistant's zone, e.g. Europe/Berlin; without TZ it
+      would be /etc/localtime (UTC in the image). Checked on Postgres 16:
+      TZ=Europe/Berlin initdb, insert at 19:08 UTC stores 21:08. So the
+      database converts back with its own setting rather than us guessing:
+      timezone(current_setting('TimeZone'), timestamp).
+    - SQLite (dev, tests) fills it with CURRENT_TIMESTAMP, which is UTC.
+    """
+    cutoff = (now or datetime.now(UTC)) - HISTORY_WINDOW
+    if db.bind.dialect.name == "postgresql":
+        logged_at = func.timezone(
+            func.current_setting("TimeZone"), InventoryLog.timestamp, type_=DateTime(timezone=True)
+        )
+    else:
+        logged_at = InventoryLog.timestamp
+        cutoff = cutoff.replace(tzinfo=None)
+    rows = (
+        await db.execute(
+            select(InventoryLog, logged_at, InventoryItem.name)
+            .outerjoin(InventoryItem, InventoryItem.barcode == InventoryLog.barcode)
+            .where(logged_at >= cutoff)
+            .order_by(InventoryLog.timestamp.desc(), InventoryLog.id.desc())
+            .limit(HISTORY_LIMIT)
+        )
+    ).all()
+    history = []
+    for entry, at, current_name in rows:
+        before, after = entry.quantity_before, entry.quantity_after
+        if before is None and after is None:
+            before, after = quantities_from_details(entry.details)
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=UTC)
+        history.append(
+            {
+                "id": entry.id,
+                "at": at.astimezone(UTC).isoformat(timespec="seconds"),
+                "barcode": entry.barcode,
+                # Kept on the entry, so a scanned-out-and-deleted item keeps its name.
+                "name": entry.name or current_name,
+                "action": entry.action,
+                "details": entry.details,
+                "quantity_before": before,
+                "quantity_after": after,
+            }
+        )
+    return history
+
+
 async def build_snapshot(db: AsyncSession) -> dict[str, Any]:
-    """Inventory and restock rules; cart and orders are added by the caller."""
+    """Inventory, restock rules and recent history; cart and orders are
+    added by the caller."""
     items = (
         await db.execute(
             select(InventoryItem)
@@ -169,6 +253,7 @@ async def build_snapshot(db: AsyncSession) -> dict[str, Any]:
             }
             for r in rules
         ],
+        "history": await build_history(db),
     }
 
 

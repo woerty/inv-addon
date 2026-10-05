@@ -353,7 +353,7 @@ async def test_snapshot_payload_shape():
 
         snapshot = await build_snapshot(db)
 
-    assert set(snapshot) == {"at", "inventory", "rules"}
+    assert set(snapshot) == {"at", "inventory", "rules", "history"}
     assert datetime.fromisoformat(snapshot["at"]).tzinfo is not None
     assert snapshot["inventory"] == [
         {
@@ -412,7 +412,7 @@ async def test_refresh_pushes_cart_and_orders(link, stub, fake_picnic):
 
     assert result == {"id": "c1", "ok": True, "data": {}}
     [snapshot] = stub.snapshots
-    assert set(snapshot) == {"at", "inventory", "rules", "cart", "orders"}
+    assert set(snapshot) == {"at", "inventory", "rules", "history", "cart", "orders"}
     assert snapshot["cart"] == {"items": [], "total_cents": 0, "slot": None}
     assert snapshot["orders"] == [
         {
@@ -431,7 +431,7 @@ async def test_snapshot_leaves_picnic_out_when_not_logged_in(link, stub, fake_pi
 
     fake_picnic.get_cart = reauth
     await link.push_snapshot(picnic=True)
-    assert set(stub.snapshots[0]) == {"at", "inventory", "rules"}
+    assert set(stub.snapshots[0]) == {"at", "inventory", "rules", "history"}
 
 
 async def test_fingerprint_changes_with_inventory(link):
@@ -536,8 +536,187 @@ async def test_run_pushes_at_startup_and_survives_failures(monkeypatch):
         with pytest.raises(asyncio.CancelledError):
             await task
 
-    assert set(snapshots[0]) == {"at", "inventory", "rules", "cart", "orders"}
-    assert set(snapshots[-1]) == {"at", "inventory", "rules"}
+    assert set(snapshots[0]) == {"at", "inventory", "rules", "history", "cart", "orders"}
+    assert set(snapshots[-1]) == {"at", "inventory", "rules", "history"}
     # Poll: 5 s, then doubled to 10 s; push: 5 s once.
     assert sorted(w for w in waits if w in (5, 10, 20)) == [5, 5, 10]
     assert link._http.is_closed
+
+
+# ── History ──
+
+
+async def _log(barcode: str, action: str, details: str | None, at: datetime | None, **columns) -> None:
+    async with TestingSessionLocal() as db:
+        entry = InventoryLog(barcode=barcode, action=action, details=details, **columns)
+        if at is not None:
+            entry.timestamp = at.astimezone(UTC).replace(tzinfo=None)  # SQLite: naive UTC
+        db.add(entry)
+        await db.commit()
+
+
+async def _history() -> list[dict]:
+    async with TestingSessionLocal() as db:
+        return await ass3_link.build_history(db)
+
+
+async def test_history_shape_and_48h_window():
+    now = datetime.now(UTC)
+    await _log("b1", "scan-out", "quantity: 3 → 2", now - timedelta(hours=1),
+               name="Milch", quantity_before=3, quantity_after=2)
+    await _log("b2", "scan-in", "qty → 4", now - timedelta(hours=47))
+    await _log("b3", "add", None, now - timedelta(hours=49), name="Alt")
+
+    history = await _history()
+
+    assert [h["barcode"] for h in history] == ["b1", "b2"]  # newest first, b3 too old
+    first = history[0]
+    assert set(first) == {
+        "id", "at", "barcode", "name", "action", "details", "quantity_before", "quantity_after",
+    }
+    assert isinstance(first["id"], int)
+    assert first["at"] == (now - timedelta(hours=1)).isoformat(timespec="seconds")
+    assert (first["name"], first["action"], first["details"]) == ("Milch", "scan-out", "quantity: 3 → 2")
+    assert (first["quantity_before"], first["quantity_after"]) == (3, 2)
+    # Old entry without columns: quantities parsed, name unknown (no row).
+    assert history[1]["name"] is None
+    assert (history[1]["quantity_before"], history[1]["quantity_after"]) == (None, 4)
+
+
+async def test_history_is_capped_at_300(monkeypatch):
+    now = datetime.now(UTC)
+    async with TestingSessionLocal() as db:
+        for i in range(305):
+            db.add(InventoryLog(
+                barcode=f"b{i}", action="scan-in", details="new item",
+                timestamp=(now - timedelta(minutes=305 - i)).replace(tzinfo=None),
+            ))
+        await db.commit()
+    history = await _history()
+    assert len(history) == 300
+    assert history[0]["barcode"] == "b304"
+
+
+async def test_history_server_timestamp_comes_out_as_utc():
+    """SQLite fills the column with CURRENT_TIMESTAMP, i.e. UTC."""
+    await _log("b1", "scan-in", "new item", None)
+    [entry] = await _history()
+    at = datetime.fromisoformat(entry["at"])
+    assert at.utcoffset() == timedelta(0)
+    assert abs(at - datetime.now(UTC)) < timedelta(seconds=10)
+
+
+async def test_history_keeps_the_name_after_scan_out_deleted_the_item(client):
+    async with TestingSessionLocal() as db:
+        db.add(InventoryItem(barcode="reis", name="Basmati Reis", quantity=1))
+        await db.commit()
+
+    response = await client.post("/api/inventory/scan-out", json={"barcode": "reis"})
+    assert response.json()["deleted"] is True
+
+    [entry] = await _history()
+    assert entry["name"] == "Basmati Reis"
+    assert (entry["action"], entry["quantity_before"], entry["quantity_after"]) == ("scan-out", 1, 0)
+
+
+async def test_history_name_falls_back_to_the_inventory_row():
+    async with TestingSessionLocal() as db:
+        db.add(InventoryItem(barcode="b1", name="Milch", quantity=2))
+        await db.commit()
+    await _log("b1", "remove", "quantity: 3 → 2", datetime.now(UTC))
+    [entry] = await _history()
+    assert entry["name"] == "Milch"
+    assert (entry["quantity_before"], entry["quantity_after"]) == (3, 2)
+
+
+async def test_every_inventory_change_records_name_and_quantities(client):
+    await client.post("/api/inventory/scan-in", json={"barcode": "4001", "storage_location_id": None})
+    await client.post("/api/inventory/scan-in", json={"barcode": "4001", "storage_location_id": None})
+    await client.post("/api/inventory/barcode", json={"barcode": "4001"})
+    await client.put("/api/inventory/4001", json={"quantity": 5})
+    await client.put("/api/inventory/4001", json={"quantity": 4})
+    await client.post("/api/inventory/remove", json={"barcode": "4001"})
+    await client.post("/api/inventory/scan-out", json={"barcode": "4001"})
+    await client.delete("/api/inventory/4001")
+    await client.post("/api/inventory/barcode", json={"barcode": "4002"})
+
+    async with TestingSessionLocal() as db:
+        rows = (await db.execute(select(InventoryLog).order_by(InventoryLog.id))).scalars().all()
+    assert [(r.barcode, r.action, r.name, r.quantity_before, r.quantity_after) for r in rows] == [
+        ("4001", "scan-in", "Testprodukt", 0, 1),
+        ("4001", "scan-in", "Testprodukt", 1, 2),
+        ("4001", "add", "Testprodukt", 2, 3),
+        ("4001", "update", "Testprodukt", 3, 5),
+        ("4001", "update", "Testprodukt", 5, 4),
+        ("4001", "remove", "Testprodukt", 4, 3),
+        ("4001", "scan-out", "Testprodukt", 3, 2),
+        ("4001", "delete", "Testprodukt", 2, 0),
+        ("4002", "add", "Testprodukt", 0, 1),
+    ]
+
+
+async def test_restock_entry_records_rule_name_and_stock(link, fake_picnic):
+    await _seed_milk(3)  # rule: min 2, target 5
+    await link.execute(_cmd("scan_out", {"barcode": "b1", "count": 2}))
+    entry = next(h for h in await _history() if h["action"] == "restock_auto")
+    assert (entry["name"], entry["quantity_before"], entry["quantity_after"]) == ("Ja! Vollmilch 1 L", None, 1)
+
+
+@pytest.mark.parametrize(
+    "details,expected",
+    [
+        ("quantity: 3 → 2", (3, 2)),
+        ("quantity: 1 → 0", (1, 0)),
+        ("quantity: 0 → -1", (0, -1)),
+        ("qty → 3", (None, 3)),
+        ("qty→1, cart delta=4", (None, 1)),
+        ("removed last item", (None, 0)),
+        ("new item", (0, 1)),
+        ("re-lookup: Milch 1 L → Milch 3", (None, None)),
+        ("name: Marmelade", (None, None)),
+        (None, (None, None)),
+    ],
+)
+def test_quantities_from_details(details, expected):
+    assert ass3_link.quantities_from_details(details) == expected
+
+
+@pytest.mark.skipif(
+    not __import__("os").environ.get("TEST_POSTGRES_URL"),
+    reason="needs a scratch Postgres: TEST_POSTGRES_URL=postgresql+asyncpg://...",
+)
+async def test_history_converts_postgres_local_time():
+    """On Postgres the naive column holds local time of the server's
+    TimeZone; the history must come out as the right instant."""
+    import os
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    from app.database import Base
+
+    engine = create_async_engine(os.environ["TEST_POSTGRES_URL"])
+    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with sessions() as db:
+            zone = await db.scalar(text("SHOW TimeZone"))
+            db.add(InventoryLog(barcode="b1", action="scan-in", details="new item"))
+            # 47 h and 49 h ago in server-local wall time.
+            for hours in (47, 49):
+                db.add(InventoryLog(barcode=f"old{hours}", action="add", timestamp=await db.scalar(
+                    text(f"SELECT (now() - interval '{hours} hours')::timestamp")
+                )))
+            await db.commit()
+            stored = await db.scalar(select(InventoryLog.timestamp).where(InventoryLog.barcode == "b1"))
+            history = await ass3_link.build_history(db)
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+    assert [h["barcode"] for h in history] == ["b1", "old47"]
+    at = datetime.fromisoformat(history[0]["at"])
+    assert abs(at - datetime.now(UTC)) < timedelta(seconds=10), (zone, stored, at)
