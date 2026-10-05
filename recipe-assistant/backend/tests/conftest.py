@@ -48,6 +48,8 @@ def isolate_picnic_credentials(monkeypatch):
     monkeypatch.setenv("PICNIC_EMAIL", "")
     monkeypatch.setenv("PICNIC_PASSWORD", "")
     monkeypatch.setenv("PICNIC_TOKEN_PATH", "/tmp/nonexistent-test-picnic-token.json")
+    monkeypatch.setenv("ASS3_URL", "")
+    monkeypatch.setenv("ASS3_TOKEN", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # (e.g. ./.picnic_token.json) since there is no writable /data on the host.
     picnic_token_path: str = "/data/picnic_token.json"
     scanner_token: str = ""
+    # Link to the ass3 agent server (app/services/ass3_link.py). Both empty
+    # -> off. Env: ASS3_URL / ASS3_TOKEN.
+    ass3_url: str = ""
+    ass3_token: str = ""
     environment: str = "development"
 
     @classmethod
@@ -53,6 +57,8 @@ class Settings(BaseSettings):
                 picnic_password=options.get("picnic_password", ""),
                 picnic_country_code=options.get("picnic_country_code", "DE"),
                 scanner_token=options.get("scanner_token", ""),
+                ass3_url=options.get("ass3_url") or "",
+                ass3_token=options.get("ass3_token") or "",
                 environment="production",
             )
         return cls()
