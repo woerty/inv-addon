@@ -40,6 +40,7 @@ from app.services.picnic.client import (
     PicnicReauthRequired,
     get_picnic_client,
 )
+from app.services.picnic.ean_links import linked_quantity
 from app.services.picnic.orders import parse_pending_orders
 
 log = logging.getLogger("ass3_link")
@@ -138,6 +139,9 @@ async def build_snapshot(db: AsyncSession) -> dict[str, Any]:
     ).scalars().all()
     images = await image_urls_by_ean(db, [i.barcode for i in items])
     rules = (await db.execute(select(TrackedProduct).order_by(TrackedProduct.name))).scalars().all()
+    # Counted like the restock check: own barcode plus every EAN stored as
+    # linked to the rule's Picnic product (no live lookup).
+    current = {r.barcode: await linked_quantity(db, r) for r in rules}
     return {
         "at": datetime.now(UTC).isoformat(timespec="seconds"),
         "inventory": [
@@ -161,6 +165,7 @@ async def build_snapshot(db: AsyncSession) -> dict[str, Any]:
                 # The level a restock fills up to, not an order amount.
                 "restock_quantity": r.target_quantity,
                 "picnic_id": r.picnic_id,
+                "current": current[r.barcode],
             }
             for r in rules
         ],
@@ -198,12 +203,16 @@ async def orders_payload(client: PicnicClientProtocol) -> list[dict[str, Any]]:
 # ── Failures and logging ──────────────────────────────────────────────────
 
 class Unauthorized(Exception):
-    pass
+    """ass3 refused the token (401, or 403 as its token endpoints answer)."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(status)
+        self.status = status
 
 
 def _describe(exc: Exception) -> str:
     if isinstance(exc, Unauthorized):
-        return "ass3 rejected the token (401) - check the ass3_token add-on option"
+        return f"ass3 rejected the token ({exc.status}) - check the ass3_token add-on option"
     if isinstance(exc, httpx.HTTPStatusError):
         return f"ass3 answered HTTP {exc.response.status_code}"
     if isinstance(exc, httpx.TimeoutException):
@@ -287,8 +296,8 @@ class Ass3Link:
 
     async def _request(self, method: str, path: str, *, timeout: float = REQUEST_TIMEOUT_S, **kwargs: Any) -> httpx.Response:
         response = await self._http.request(method, PREFIX + path, timeout=timeout, **kwargs)
-        if response.status_code == 401:
-            raise Unauthorized()
+        if response.status_code in (401, 403):
+            raise Unauthorized(response.status_code)
         response.raise_for_status()
         return response
 

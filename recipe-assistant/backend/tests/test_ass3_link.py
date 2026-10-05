@@ -143,12 +143,12 @@ def test_repeated_failure_is_logged_once(caplog):
     down = httpx.ConnectError("refused", request=request)
     with caplog.at_level(logging.INFO, logger="ass3_link"):
         delays = [failures.failed(down) for _ in range(3)]
-        failures.failed(ass3_link.Unauthorized())
+        failures.failed(ass3_link.Unauthorized(403))
         failures.succeeded()
     assert delays == [5, 10, 20]
     messages = [r.getMessage() for r in caplog.records]
     assert sum("unreachable" in m for m in messages) == 1
-    assert sum("token (401)" in m for m in messages) == 1
+    assert sum("rejected the token (403)" in m for m in messages) == 1
     assert any("works again after 4" in m for m in messages)
 
 
@@ -369,9 +369,40 @@ async def test_snapshot_payload_shape():
     assert snapshot["rules"] == [
         {
             "barcode": "4014400900057", "name": "Ja! Vollmilch 1 L",
-            "min_quantity": 2, "restock_quantity": 6, "picnic_id": "s100",
+            "min_quantity": 2, "restock_quantity": 6, "picnic_id": "s100", "current": 2,
         }
     ]
+
+
+async def test_snapshot_rule_current_counts_linked_eans_like_restock():
+    """Stock on other EANs of the rule's Picnic product counts, through the
+    stored links -- also for a rule on a picnic: placeholder barcode."""
+    from app.models.picnic import PicnicEanLink
+    from app.services.picnic.ean_links import linked_quantity
+
+    async with TestingSessionLocal() as db:
+        # Placeholder rule, stock on two linked EANs.
+        db.add(TrackedProduct(barcode="picnic:s100", picnic_id="s100", name="Sahne", min_quantity=3, target_quantity=6))
+        db.add(InventoryItem(barcode="4000000000011", name="Sahne A", quantity=2))
+        db.add(InventoryItem(barcode="4000000000012", name="Sahne B", quantity=3))
+        db.add(PicnicEanLink(ean="4000000000011", picnic_id="s100"))
+        db.add(PicnicEanLink(ean="4000000000012", picnic_id="s100"))
+        # Rule on a real barcode with a row, plus a linked second EAN.
+        db.add(TrackedProduct(barcode="4000000000021", picnic_id="s200", name="Milch", min_quantity=2, target_quantity=4))
+        db.add(InventoryItem(barcode="4000000000021", name="Milch", quantity=1))
+        db.add(InventoryItem(barcode="4000000000022", name="Milch neu", quantity=4))
+        db.add(PicnicEanLink(ean="4000000000022", picnic_id="s200"))
+        # Not linked to anything: counts for no rule.
+        db.add(InventoryItem(barcode="4000000000031", name="Sahne C", quantity=7))
+        await db.commit()
+
+        snapshot = await build_snapshot(db)
+        rules = (await db.execute(select(TrackedProduct))).scalars().all()
+        restock_view = {r.barcode: await linked_quantity(db, r) for r in rules}
+
+    current = {r["barcode"]: r["current"] for r in snapshot["rules"]}
+    assert current == {"picnic:s100": 5, "4000000000021": 5}
+    assert current == restock_view
 
 
 async def test_refresh_pushes_cart_and_orders(link, stub, fake_picnic):
@@ -434,16 +465,19 @@ async def test_poll_runs_commands_in_order_and_posts_results(link, stub, fake_pi
     assert snapshot["inventory"][0]["quantity"] == 2
 
 
-async def test_poll_raises_on_401(stub, fake_picnic):
+@pytest.mark.parametrize("status", [401, 403])
+async def test_rejected_token_raises_unauthorized(fake_picnic, status):
     link = Ass3Link(
         _settings(),
         session_factory=TestingSessionLocal,
         picnic_factory=lambda: fake_picnic,
-        transport=httpx.MockTransport(lambda request: httpx.Response(401)),
+        transport=httpx.MockTransport(lambda request: httpx.Response(status)),
     )
-    with pytest.raises(ass3_link.Unauthorized):
+    with pytest.raises(ass3_link.Unauthorized) as raised:
         await link.poll_once()
     await link.aclose()
+    assert "token" in ass3_link._describe(raised.value)
+    assert str(status) in ass3_link._describe(raised.value)
 
 
 async def test_run_pushes_at_startup_and_survives_failures(monkeypatch):
